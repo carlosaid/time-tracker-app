@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aplicación Principal</title>
+    <link rel="stylesheet" href="../styles/main.css" />
+    <link rel="stylesheet" href="../styles/index.css" />
+  </head>
+  <body>
+    <div class="app-container-index">
+      <div class="window-controls">
+        <svg
+          id="close-all"
+          class="close"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="size-6"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M6 18 18 6M6 6l12 12"
+          />
+        </svg>
+      </div>
+      <!-- <div id="drag-area"></div> -->
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <div class="avatar">
+            <!-- <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+            </svg> -->
+            <img id="profileImage" alt="User Avatar" class="size-6"/>
+          </div>
+          <div class="grid gap-1">
+            <div id="username" class="font-medium text-lg element"></div>
+            <!-- <div class="text-muted-foreground text-sm element">Rol de usuario</div> -->
+          </div>
+        </div>
+
+        <!-- Fecha y Hora -->
+        <div class="text-muted-foreground text-sm element">
+          <span id="date"></span>
+        </div>
+      </div>
+      <div class="separator"></div>
+      <!-- Nueva tabla de trabajo del día -->
+      <div class="work-day-table">
+        <h2 class="text-lg font-medium mb-2 element">Lista de trabajo del día</h2>
+        <div class="flex justify-between items-center mb-4">
+        <div class="flex gap-2">
+          <button class="btn-add" id="btn-add" onclick="addRow(this)" value="create">Crear Nuevo</button>
+          <button class="btn-pause" id="btn-pause">Pausar</button>
+        </div>
+        <!-- <button class="btn-add" id="btn-send">Enviar Datos</button> -->
+        
+          <!-- sumador de horas -->
+        <div>
+          <label for="total-hours">Total de horas trabajadas:</label>
+          <span id="counter">10</span>
+        </div>
+        
+        </div>
+        <div class="table-container">
+          <table class="table-day">
+            <thead>
+              <tr>
+                <th class="tb-client">Cliente</th>
+                <th class="tb-start-work">Hora Inicio</th>
+                <th class="tb-end-workd"">Hora Final</th>
+                <th class="tb-task">Tarea</th>
+                <th class="tb-description">Descripción</th>
+                <th class="tb-time-work">Tiempo</th>
+                <th class="tb-actions">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="work-day-tbody">
+              <!-- Las filas serán insertadas dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+
+      <div class="flex justify-end gap-2 mt-6 button-container">
+        <p class="note element ">Nota: Esta aplicación puede registrar capturas de su pantalla de forma aleatoria.</p>
+        <button class="button button-outline" title="Cerrar sesión">
+          <svg
+            id="logout"
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            color="black"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" x2="9" y1="12" y2="12" />
+          </svg>
+        </button>
+        <button class="button" title="ocultar ventana">
+          <svg
+            id="close"
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14" />
+            <path d="M2 20h20" />
+            <path d="M14 12v.01" />
+          </svg>
+        </button>
+      </div>
+      <span class="message-error" id="message-error"></span>
+      
+    </div>
+    <div id="confirmModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;">
+      <div class="modal">
+          <p>¿Estás seguro que deseas eliminar esta fila?</p>
+          <div class="modal-buttons">
+            <button id="confirmDelete">Sí, eliminar</button>
+            <button id="cancelDelete">Cancelar</button>
+          </div>
+      </div>
+    </div>
+    <!-- Scripts -->
+    <script src="../scripts/main.js"></script>
+  </body>
+</html>
+
