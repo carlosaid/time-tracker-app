@@ -342,7 +342,14 @@ tr:nth-child(even) {
   width: 20%;
 }
 
-.btn-add{
+.btn-add, .btn-end {
+  width: 150px;
+  margin: 5px 0px;
+  text-align: center;
+}
+
+
+.btn{
   width: 150px;
   margin: 5px 0px;
   text-align: center;

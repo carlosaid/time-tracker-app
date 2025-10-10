@@ -30,6 +30,7 @@ let presenceJob = null;
 let screenshotJob = null;
 let addressJob = null;
 let session = null;
+let initialTimeout = null; 
 
 const activityData = {
   odoo_id: null,
@@ -41,6 +42,7 @@ const activityData = {
   partner_id: null,
   description: null,
   task_id: null,
+  brand_id: null,
   pause_id: null,
 };
 
@@ -111,34 +113,72 @@ if (!gotTheLock) {
     const timestamp = new Date().toISOString().replace('T',' ').substring(0, 19);
     activityData.presence = { status: 'active', timestamp: timestamp }
   }
-  async function setupCronJobs() {
+  // async function setupCronJobs() {
     
-    const { timeNotification } = await getCredentials(['timeNotification']);
+  //   const { timeNotification } = await getCredentials(['timeNotification']);
 
-    if (!timeNotification) {
-      return;
-    }
+  //   if (!timeNotification) {
+  //     return;
+  //   }
 
-    const notifationInterval = parseInt(timeNotification);
+  //   const notifationInterval = parseInt(timeNotification);
 
-    presenceJob = cron.schedule(`*/${notifationInterval} * * * *`, () => {
-      presenceNotification(activityData);
-    });
+  //   presenceJob = cron.schedule(`*/${notifationInterval} * * * *`, () => {
+  //     presenceNotification(activityData);
+  //   });
 
-    screenshotJob = cron.schedule(`*/${notifationInterval} * * * *`, () => {
-      captureScreen(activityData);
+  //   screenshotJob = cron.schedule(`*/${notifationInterval} * * * *`, () => {
+  //     captureScreen(activityData);
       
 
-    });
+  //   });
 
-    addressJob = cron.schedule(`*/${notifationInterval} * * * *`, () => {
-      getIpAndLocation(activityData)
-    });
+  //   addressJob = cron.schedule(`*/${notifationInterval} * * * *`, () => {
+  //     getIpAndLocation(activityData)
+  //   });
 
-    if (presenceJob && screenshotJob && addressJob) {
-      return;
-    }
+  //   if (presenceJob && screenshotJob && addressJob) {
+  //     return;
+  //   }
+  // }
+
+  async function setupCronJobs() {
+    const { timeNotification } = await getCredentials(['timeNotification']);
+    if (!timeNotification) return;
+    const intervalMinutes = parseInt(timeNotification);
+    const intervalMs = intervalMinutes * 60 * 1000;
+    const now = new Date();
+    const minutes = now.getMinutes();
+    const remainder = minutes % intervalMinutes;
+    const minutesToNext = remainder === 0 ? intervalMinutes : intervalMinutes - remainder;
+    const msToNext = minutesToNext * 60 * 1000 - (now.getSeconds() * 1000 + now.getMilliseconds());
+
+    if (initialTimeout) clearTimeout(initialTimeout);
+
+    initialTimeout = setTimeout(() => {
+        presenceNotification(activityData);
+        captureScreen(activityData);
+        getIpAndLocation(activityData);
+      
+      presenceJob = setInterval(() => presenceNotification(activityData), intervalMs);
+      screenshotJob = setInterval(() => captureScreen(activityData), intervalMs);
+      addressJob = setInterval(() => getIpAndLocation(activityData), intervalMs);
+      initialTimeout = null;
+    }, msToNext);
+}
+
+function stopCronJobs() {
+  if (initialTimeout) {
+    clearTimeout(initialTimeout);
+    initialTimeout = null;
+    console.log('Initial timeout cleared');
   }
+
+  if (presenceJob) clearInterval(presenceJob);
+  if (screenshotJob) clearInterval(screenshotJob);
+  if (addressJob) clearInterval(addressJob);
+  presenceJob = screenshotJob = addressJob = null;
+}
 
   async function verifyCredentialsOnStart() {
     try {
@@ -252,14 +292,14 @@ if (!gotTheLock) {
     }
   }
 
-  function stopCronJobs() {
-    if (presenceJob) {
-      presenceJob.stop();
-    }
-    if (screenshotJob) {
-      screenshotJob.stop();
-    }
-  }
+  // function stopCronJobs() {
+  //   if (presenceJob) {
+  //     presenceJob.stop();
+  //   }
+  //   if (screenshotJob) {
+  //     screenshotJob.stop();
+  //   }
+  // }
 
   app.whenReady().then(() => {
 
@@ -480,6 +520,10 @@ if (!gotTheLock) {
     getModalWindow().webContents.send('timer-event', 'resume');
   });
 
+  ipcMain.on('end-task', () => {
+    createModalWindow();
+  })
+
   ipcMain.on('logout', async () => {
     await sendLastData();
     try {
@@ -588,7 +632,9 @@ if (!gotTheLock) {
       resumeNotification();
     }
   })
-  ipcMain.on('send-data', async (event, client, description, task, pause) => {
+  ipcMain.on('send-data', async (event, client, description, brand, task, pause) => {
+    console.log(`Datos recibidos en main:client_id ${client}, ${description}, brand_id: ${brand}, task_id: ${task}, pause: ${pause}`);
+    
     try {
       const { uid } = await getCredentials(['uid']);
       const store = await getStore();
@@ -673,6 +719,7 @@ if (!gotTheLock) {
       activityData.partner_id = client;
       activityData.description = description;
       activityData.task_id = task;
+      activityData.brand_id = brand;
       activityData.pause_id = pause;
       activityData.presence = { status: 'active', timestamp: new Date().toISOString().replace('T',' ').substring(0, 19) };
   
@@ -686,10 +733,8 @@ if (!gotTheLock) {
       let lastClient = null;
       
       if (pause > 0) {
-        console.log('gestionando la puasa')
         const lastPause = work_day.find(rec => rec.pause === true);
         if (!lastPause) {
-          console.log('No hay pausa previa registrada');
           const data_work_day = {
             client: { id: client_data.id, name: client_data.name },
             date: new Date().toLocaleDateString('en-US'),
@@ -719,12 +764,10 @@ if (!gotTheLock) {
           lastPause.description = 'Pausa';
           lastPause.pause = false;
           store.set(`work-day-${uid}`, work_day);
-          console.log('Ultima pausa actualizada:', lastPause);
         }
       
         
       } else {
-        console.log('gestionando datos no pausa')
         if (work_day.length === 0) {
           const data_work_day = {
             client: client_data,
@@ -802,7 +845,7 @@ if (!gotTheLock) {
         });  
       }
       
-
+      
       event.reply('send-data-response');
       //CERRAR MODAL HASTA DESPUES DE ENVIAR LA INFO
       modalWindows.close();

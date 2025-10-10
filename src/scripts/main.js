@@ -20,8 +20,16 @@ ipcRenderer.on('timer-event',  (event, data) => {
 	const btnPause = document.getElementById('btn-pause');
 	if (data === 'pause') {
 		btnPause.textContent = 'Reanudar';
+		document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
+			btn.disabled = true ;
+			btn.style.cursor = 'not-allowed';
+    	});
 	} else {
 		btnPause.textContent = 'Pausar';
+		document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
+			btn.disabled = false ;
+			btn.style.cursor = 'pointer';
+    	});
 	}
 });
 
@@ -225,7 +233,12 @@ async function editRow(button) {
 
 async function saveRow(button, originalStartTime, originalEndTime) {
 	tbody = document.getElementById('work-day-tbody');
-	
+	const btnEnd = document.querySelector('.btn-end');
+	const btnPause = document.querySelector('.btn-pause');
+	[btnSave, btnEnd, btnPause].forEach(btn => {
+		btn.disabled = false;
+		btn.style.cursor = 'pointer';
+	});
 	const btnSave = document.querySelector('.btn-add');
 	// const btnSend = document.getElementById('btn-send');
 	const now = new Date().toLocaleTimeString('es-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -437,9 +450,13 @@ async function saveRow(button, originalStartTime, originalEndTime) {
 function cancelEdit(button, originalStartTime, originalEndTime) {
 	const btnSave = document.querySelector('.btn-add');
 	// const btnSend = document.getElementById('btn-send');
-	btnSave.disabled = false;
-	btnSave.style.cursor = 'pointer';
-	btnSave.style.backgroundColor = '#0056b3';
+	const btnEnd = document.querySelector('.btn-end');
+	const btnPause = document.querySelector('.btn-pause');
+	[btnSave, btnEnd, btnPause].forEach(btn => {
+		btn.disabled = false;
+		btn.style.cursor = 'pointer';
+		// btn.style.backgroundColor = '#0056b3';
+	});
 	// btnSend.disabled = false;
 	// btnSend.style.backgroundColor = '#0056b3';
 	// btnSend.style.cursor = 'pointer';
@@ -501,9 +518,12 @@ async function deleteRow(button) {
 
 function addRow(button) {
 	const btnSave = document.querySelector('.btn-add');
-	
-	btnSave.disabled = true;
-	btnSave.style.cursor = 'not-allowed';
+	const btnEnd = document.querySelector('.btn-end');
+	const btnPause = document.querySelector('.btn-pause');
+	[btnSave, btnEnd, btnPause].forEach(btn => {
+		btn.disabled = true;
+		btn.style.cursor = 'not-allowed';
+	});
 	
 	if (btnSave.value === 'create') {
 		
@@ -563,6 +583,10 @@ function addRow(button) {
 
 }
 
+function endTask(button) {
+	
+}
+
 function convertTo24HourFormat(time) {
     console.log('-------------->', time)
     if (!time) return time; 
@@ -615,6 +639,13 @@ async function renderWorkDayData() {
     const workDayData = await ipcRenderer.invoke('get-work-day');
     const today = new Date();
     const todayFormatted = today.toLocaleDateString('en-US');
+	const btnPause = document.getElementById('btn-pause');
+	if (btnPause.textContent === 'Reanudar') {
+		document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
+		btn.disabled = true ;
+		btn.style.cursor = 'not-allowed';
+    });
+	}
     
 
     const filteredData = workDayData.filter(item => {
@@ -626,13 +657,15 @@ async function renderWorkDayData() {
 
     const tbody = document.getElementById('work-day-tbody');
     const counter = document.getElementById('counter');
+	const btnEnd = document.getElementById('btn-end');
     tbody.innerHTML = '';
     if (filteredData.length === 0 ) {
         const emptyRow = document.createElement('tr');
         emptyRow.innerHTML = `<td colspan="5">No hay datos disponibles</td>`;
         tbody.appendChild(emptyRow);
+		btnEnd.style.display = 'none';
     }
-
+	btnEnd.style.display = filteredData.length == 0 ? 'none' : 'block';
     let totalMinutes = 0;
 	const userId = localStorage.getItem('uid');
 	
@@ -775,7 +808,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 });
-
+const btnEnd = document.getElementById('btn-end');
 const btnPause = document.getElementById('btn-pause');
 document.getElementById('logout').addEventListener('click', () => {
 	btnPause.textContent = 'Pausar';
@@ -790,8 +823,12 @@ btnPause.addEventListener('click', () => {
         ipcRenderer.send('pause-timer');
     } 
 	if (btnPause.textContent === "Reanudar") {
-        ipcRenderer.send('resume-timer');
+        ipcRenderer.send('resume-timer')
     }
+});
+
+btnEnd.addEventListener('click', () => {
+	ipcRenderer.send('end-task');
 });
 
 function updateTime() {

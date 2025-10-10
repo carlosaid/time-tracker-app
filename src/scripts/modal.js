@@ -1,13 +1,33 @@
 const { ipcRenderer, contextBridge } = require('electron');
 let timerEventData = null;
+let currentError = false;
+ipcRenderer.on('error-occurred', (event, error) => {
+	const messageError = document.querySelector('#error-message');
+    const button = document.querySelector('button');
+    const buttonText = document.getElementById('button-text');
+    const closeButton = document.querySelector('#close');
+    console.error('Error recibido desde el proceso principal:', error.message);
+	console.error('Stack Trace:', error.stack);
+    document.getElementById('svg-loading').classList.add('no-loading');
+    document.getElementById('svg-loading').classList.remove('loading');
+    buttonText.style.display = 'block';
+    button.style.pointerEvents = 'auto';
+    button.style.opacity = '1';
+    closeButton.style.pointerEvents = 'auto'; // habilita clics en el SVG
+    closeButton.style.opacity = '1';
+    messageError.textContent = 'Ha ocurrido un error. Inténtalo de nuevo.';
+
+});
 ipcRenderer.on('timer-event', async (event, data) => {
     console.log('timer-event', data);
     timerEventData = data;
     const divPause = document.getElementsByClassName('pause');
+    document.querySelectorAll('.form-group:not(.pause)').forEach(el => {
+        el.style.display = timerEventData === 'pause' ? 'none' : 'block';
+    });
 
     if (divPause.length > 0) {
         divPause[0].style.display = 'block';
-        // closeButton.style.display = 'none';
     }
 
     const pauseSelect = document.getElementById('pause');
@@ -28,17 +48,19 @@ async function showClients() {
     try {
         const { clients } = await ipcRenderer.invoke('get-clients-and-pauses');
         const clientSelect = document.getElementById('client');
+        const brandSelect = document.getElementById('brand');
         const taskSelect = document.getElementById('task');
 
         if (!clients || clients.length === 0) {
             console.warn('No hay clientes disponibles.');
             clientSelect.innerHTML = '<option value="">No hay clientes disponibles</option>';
             taskSelect.innerHTML = '<option value="">No hay tareas disponibles</option>';
+            brandSelect.innerHTML = '<option value="">No hay marcas disponibles</option>';
             return;
         }
 
         clientSelect.innerHTML = '';
-        taskSelect.innerHTML = '<option value="">Selecciona un cliente primero</option>';
+        taskSelect.innerHTML = '<option value="">Selecciona una marca primero</option>';
 
         let firstValidClient = null;
 
@@ -72,16 +94,16 @@ async function showClients() {
         });
 
 
-        const updateTasks = (clientId) => {
-            taskSelect.innerHTML = '';
+        const updateBrands = (clientId) => {
+            brandSelect.innerHTML = '';
 
             if (!clientId) {
-                taskSelect.innerHTML = '<option value="">Selecciona un cliente primero</option>';
+                brandSelect.innerHTML = '<option value="">Selecciona un cliente primero</option>';
                 return;
             }
 
             const selectedClient = clients.find(client => String(client.id) === String(clientId));
-            selectedClient.tasks.sort((a, b) => {
+            selectedClient.brands.sort((a, b) => {
                 if (a.name.toLowerCase() < b.name.toLowerCase()) {
                     return -1;  // a va antes que b
                 }
@@ -92,30 +114,75 @@ async function showClients() {
             });
             
             
-            if (selectedClient && selectedClient.tasks.length > 0) {
-                selectedClient.tasks.forEach(task => {
+            if (selectedClient && selectedClient.brands.length > 0) {
+                selectedClient.brands.forEach(brand => {
                     const option = document.createElement('option');
-                    option.value = String(task.id);
-                    option.textContent = task.name;
-                    taskSelect.appendChild(option);
+                    option.value = String(brand.id);
+                    option.textContent = brand.name;
+                    brandSelect.appendChild(option);
                 });
             } else {
-                taskSelect.innerHTML = '<option value="">No hay tareas disponibles</option>';
+                brandSelect.innerHTML = '<option value="">No hay marcas disponibles</option>';
+            }
+
+            if (selectedClient && selectedClient.tasks.length > 0) {
+                taskSelect.innerHTML = '';
+                selectedClient.tasks.forEach(task => {
+                    if (brandSelect.value && brandSelect.value == task.brand_id || !task.brand_id) {
+                        const option = document.createElement('option');
+                        option.value = String(task.id);
+                        option.textContent = task.name;
+                        taskSelect.appendChild(option);
+                    }
+                    
+                });
             }
         };
 
-        // Evento para cambiar las tareas cuando se seleccione otro cliente
+        const updateTasks = (brandId) => {
+            taskSelect.innerHTML = '';
+
+            if (!brandId) {
+                taskSelect.innerHTML = '<option value="">Selecciona una marca primero</option>';
+                return;
+            }
+
+            const clientId = clientSelect.value;
+            if (!clientId) {
+                taskSelect.innerHTML = '<option value="">Selecciona un cliente primero</option>';
+                return;
+            }
+
+            const selectedClient = clients.find(client => String(client.id) === String(clientId));
+            if (selectedClient && selectedClient.tasks.length > 0) {
+                selectedClient.tasks.forEach(task => {
+                    if (brandId == task.brand_id || !task.brand_id) {
+                        const option = document.createElement('option');
+                        option.value = String(task.id);
+                        option.textContent = task.name;
+                        taskSelect.appendChild(option);
+                    }
+
+                });
+            }
+        }
+
+        // Evento para cambiar las marcas cuando se seleccione otro cliente
         clientSelect.addEventListener('change', () => {
-            updateTasks(clientSelect.value);
+            updateBrands(clientSelect.value);
+        });
+
+        brandSelect.addEventListener('change', () => {
+            updateTasks(brandSelect.value);
         });
 
         // Seleccionar correctamente el cliente si hay uno guardado
         if (lastClient) {
             clientSelect.value = String(lastClient.id);
-            updateTasks(lastClient.id);
+            updateBrands(lastClient.id);
         } else if (firstValidClient) {
             clientSelect.value = String(firstValidClient.id);
-            updateTasks(firstValidClient.id);
+            updateBrands(firstValidClient.id);
         }
 
     } catch (error) {
@@ -132,6 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const button = document.querySelector('button');
     const divPause = document.getElementsByClassName('pause');
     const pauseSelect = document.getElementById('pause');
+    const messageError = document.querySelector('#error-message');
     document.getElementById('modalForm').addEventListener('submit', async (event) => {
         event.preventDefault();
         const svgElement = document.getElementById('svg-loading');
@@ -147,6 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
             closeButton.style.opacity = '0.5'; // Opcional: lo hace visualmente "deshabilitado"
             button.style.opacity = '0.5'; // Opcional: lo hace visualmente "deshabilitado"
             button.style.pointerEvents = 'none'; // Deshabilita el botón
+            messageError.textContent = ''; 
 
         }
 
@@ -155,8 +224,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const client = formData.get('client');
         const task = formData.get('task');
         const pause = formData.get('pause');
-
-        ipcRenderer.send('send-data', client, description, task, pause);
+        const brand = formData.get('brand');
+        ipcRenderer.send('send-data', client, description, brand, task, pause);
         ipcRenderer.send('change-timer-status', timerEventData);
         ipcRenderer.once('send-data-response', () => {
             event.target.querySelector('input[name="description"]').value = '';
@@ -171,11 +240,11 @@ document.addEventListener('DOMContentLoaded', () => {
             divPause[0].style.display = 'none';
             pauseSelect.innerHTML = '';
         });
-
     });
+    
     showClients();
 
-
+    
     closeButton.addEventListener('click', (event) => {
         const data = JSON.parse(localStorage.getItem('workDayData'))
         lastClient = data.pop();
@@ -185,6 +254,9 @@ document.addEventListener('DOMContentLoaded', () => {
         divPause[0].style.display = 'none';
         pauseSelect.innerHTML = '';
         timerEventData = null;
+        document.querySelectorAll('.form-group:not(.pause)').forEach(el => {
+            el.style.display = 'block';
+        });
         
     });
 
