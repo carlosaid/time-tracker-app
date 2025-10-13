@@ -3,7 +3,7 @@ const { app, Tray, Menu, ipcMain, BrowserWindow, net , powerMonitor } = require(
 const { autoUpdater, AppUpdater } = require("electron-updater");
 const { authenticateUser } = require('./src/odoo/authenticateUser');
 const { getClients } = require('./src/odoo/getClients');
-const { getTimeNotification } = require('./src/odoo/getTimeNotification');
+const { getConfig } = require('./src/odoo/getConfig');
 const { presenceNotification } = require('./src/utils/presenceNotification');
 const cron = require('node-cron');
 const path = require('path');
@@ -19,6 +19,8 @@ const { checkServerConnection } = require('./src/utils/checkConnection');
 const { getUserActivity } = require('./src/odoo/getUserActivity');
 const { sendDataSummary } = require('./src/odoo/sendData');
 const { getDataPause } = require('./src/odoo/getDataPuase');
+const { systemLogger } = require('./src/utils/systemLogs');
+const logger = systemLogger();
 async function getStore() {
   const { default: Store } = await import('electron-store');
   return new Store();
@@ -91,27 +93,16 @@ if (!gotTheLock) {
   }
   
   function firstNotification() {
-    // presenceNotification(activityData);
-    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    activityData.presence = { status: 'active', timestamp: timestamp }
-    captureScreen(activityData);
-    getIpAndLocation(activityData);
+    updateActivityPresence();
     const modalWindows = createModalWindow();
     modalWindows.show();
   }
-
-  function pauseNotification() {
+  
+  function updateActivityPresence() {
     captureScreen(activityData);
     getIpAndLocation(activityData);
     const timestamp = new Date().toISOString().replace('T',' ').substring(0, 19);
-    activityData.presence = { status: 'active', timestamp: timestamp }
-  }
-
-  function resumeNotification() {
-    captureScreen(activityData);
-    getIpAndLocation(activityData);
-    const timestamp = new Date().toISOString().replace('T',' ').substring(0, 19);
-    activityData.presence = { status: 'active', timestamp: timestamp }
+    activityData.presence = { status: 'active', timestamp };
   }
   // async function setupCronJobs() {
     
@@ -171,7 +162,7 @@ function stopCronJobs() {
   if (initialTimeout) {
     clearTimeout(initialTimeout);
     initialTimeout = null;
-    console.log('Initial timeout cleared');
+    logger.info('Cron jobs detenidos');
   }
 
   if (presenceJob) clearInterval(presenceJob);
@@ -186,17 +177,17 @@ function stopCronJobs() {
       const { username, password, url, db , uid, session_id, timeNotification } = await getCredentials(['username', 'password', 'url', 'db', 'uid', 'session_id','timeNotification']);
 
       if (username && password) {
-        
+        logger.info(`Iniciando sesión para el usuario: ${username}`);
         try {
-          const[clients, userActivityData, tm , connection, pausas] = await Promise.all([
+          const[clients, userActivityData, odooConfig , connection, pausas] = await Promise.all([
             getClients(session_id, url),
             getUserActivity(),
-            getTimeNotification(session_id, url),
+            getConfig(session_id, url),
             checkServerConnection(),
             getDataPause()
           ]);
-          
-          await saveCredentials(username, password, url, tm.time_notification.toString()  , uid, session_id, db);
+          logger.info(`Configuración obtenida: ${JSON.stringify(odooConfig)}`);
+          await saveCredentials(username, password, url, odooConfig.time_notification.toString()  , uid, session_id, db);
           session = true;
           
           const store = await getStore();
@@ -270,9 +261,11 @@ function stopCronJobs() {
           });
           
           store.set('clients', clients);
+          store.set('odooConfig', odooConfig);
           store.set('pauses', pausas);
         } catch(error) {
-          console.log('Error al iniciar', error);
+          // console.log('Error al iniciar', error);
+          logger.error(`Error al iniciar la aplicación: ${error.message}`);
         }
         
         
@@ -316,13 +309,13 @@ function stopCronJobs() {
       try {
         
         const { setCookieHeader, uid, imageBase64 , name } = await authenticateUser(username, password, url, db);
-        const [clients ,tm ,store] = await Promise.all([
+        const [clients ,odooConfig ,store] = await Promise.all([
           getClients(setCookieHeader, url),
-          getTimeNotification(setCookieHeader, url),
+          getConfig(setCookieHeader, url),
           getStore()
         ]);
 
-        await saveCredentials(username, password, url, tm.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
+        await saveCredentials(username, password, url, odooConfig.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
         const pauses = await getDataPause()
         const userActivityData = await getUserActivity();
         firstNotification();
@@ -396,6 +389,7 @@ function stopCronJobs() {
         });
         
         store.set('clients', clients);
+        store.set('odooConfig', odooConfig);
         store.set('pauses', pauses);
         return {uid , name , imageBase64 };
         
@@ -478,7 +472,8 @@ function stopCronJobs() {
     const dateLocal = new Date().toLocaleDateString('en-US');
     
     const endLocalWork = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    console.log(endLocalWork);
+    logger.info(`Hora de finalización del trabajo: ${endLocalWork}`);
+
     const completeDate = new Date(`${dateLocal} ${endLocalWork}`).toISOString().replace('T',' ').substring(0, 19);
     const completeDateStartWork = new Date(`${dateLocal} ${lastItem.startWork}`).toISOString().replace('T',' ').substring(0, 19);
     
@@ -507,15 +502,11 @@ function stopCronJobs() {
   });
 
   ipcMain.on('pause-timer', () => {
-    // stopCronJobs();
-    // pauseNotification();
     createModalWindow();
     getModalWindow().webContents.send('timer-event', 'pause');
   })
   
   ipcMain.on('resume-timer', () => {
-    // setupCronJobs();
-    // resumeNotification();
     createModalWindow();
     getModalWindow().webContents.send('timer-event', 'resume');
   });
@@ -524,13 +515,18 @@ function stopCronJobs() {
     createModalWindow();
   })
 
+  ipcMain.on('prev-hours', () => {
+    createModalWindow();
+    getModalWindow().webContents.send('prev-hours');
+  })
+
   ipcMain.on('logout', async () => {
     await sendLastData();
     try {
       
       await clearCredentials();
       
-      console.log('Credenciales eliminadas');
+      logger.info('Usuario ha cerrado sesión');
 
       const mainWindow = getMainWindow();
       if (mainWindow) {
@@ -560,7 +556,7 @@ function stopCronJobs() {
     const store = await getStore();
     const { uid } = await getCredentials(['uid']);
     const work_day = store.set(`work-day-${uid}`, data);
-    console.log('Datos actualizados:', store.get('work-day'));
+    // console.log('Datos actualizados:', store.get('work-day'));
 
     // // // BrowserWindow.getAllWindows().forEach(win => {
     // // //   win.webContents.send('work-day-updated', work_day);
@@ -580,6 +576,7 @@ function stopCronJobs() {
     ]);
     
     console.log('Datos enviados:', odoo_ids, odoo_id);
+    logger.info(`Datos enviados: ${odoo_ids}, Resumen: ${odoo_id}`);
     const store = await getStore();
     const { uid } = await getCredentials(['uid']);
     const work_day = store.get(`work-day-${uid}`) || [];
@@ -624,32 +621,37 @@ function stopCronJobs() {
 
     if (timerEventData === 'pause') {
       stopCronJobs();
-      pauseNotification();
+      updateActivityPresence();
     }
 
     if (timerEventData === 'resume') {
       setupCronJobs();
-      resumeNotification();
+      updateActivityPresence();
     }
   })
-  ipcMain.on('send-data', async (event, client, description, brand, task, pause) => {
-    console.log(`Datos recibidos en main:client_id ${client}, ${description}, brand_id: ${brand}, task_id: ${task}, pause: ${pause}`);
-    
+
+  ipcMain.on('error-modal', async (evet, message)=>{
+    logger.error(`Modal: ${message}`)
+  });
+
+  ipcMain.on('send-data', async (event, data) => {
+    const { client, description, brand, task, pause, regPrevHour = false} = data;
+    logger.info(`Datos recibidos del formulario: ${JSON.stringify({ client, description, task , pause, regPrevHour })}`);
     try {
       const { uid } = await getCredentials(['uid']);
       const store = await getStore();
       const offLineaData = store.get('offlineData') || [];
-      console.log(offLineaData.length);
+      // console.log(offLineaData.length);
       const work_day = store.get(`work-day-${uid}`) || [];
       
       //Enviar datos offlinea primero
       if (offLineaData.length > 0) {
-        console.time('time-function-sendLocalData');
+        // console.time('time-function-sendLocalData');
         await sendLocalData('offlineData', 'summary');
         await sendLocalData('offlineData', 'normal');
-        console.timeEnd('time-function-sendLocalData');
+        // console.timeEnd('time-function-sendLocalData');
         const synchronizeData = await getUserActivity();
-        console.log(synchronizeData)
+        // console.log(synchronizeData)
         let data = [];
 
         let groupedActivities = [];
@@ -713,7 +715,8 @@ function stopCronJobs() {
       const modalWindows = createModalWindow();
       modalWindows.show();
 
-      console.log('Datos recibidos del formulario:', { client, description, task , pause });
+      // console.log('Datos recibidos del formulario:', { client, description, task , pause });
+      logger.info(`Datos recibidos del formulario: ${JSON.stringify({ client, description, task , pause })}`);
      
       // Asignación de datos a `activityData`
       activityData.partner_id = client;
@@ -724,12 +727,8 @@ function stopCronJobs() {
       activityData.presence = { status: 'active', timestamp: new Date().toISOString().replace('T',' ').substring(0, 19) };
   
       const client_data = store.get('clients').find(rec => rec.id == client);
-      if (client_data) {
-        console.log('Cliente encontrado:', client_data);
-      } else {
-        console.log('Cliente no encontrado');
-      }
       const task_name = client_data['tasks'].find( rec => rec.id === parseInt(task))?.name || ' ';
+      const brand_name = client_data['brands'].find( rec => rec.id === parseInt(brand))?.name || ' ';
       let lastClient = null;
       
       if (pause > 0) {
@@ -737,6 +736,7 @@ function stopCronJobs() {
         if (!lastPause) {
           const data_work_day = {
             client: { id: client_data.id, name: client_data.name },
+            brand: brand_name,
             date: new Date().toLocaleDateString('en-US'),
             startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
             endWork: '00:00',
@@ -767,10 +767,12 @@ function stopCronJobs() {
         }
       
         
-      } else {
+      } 
+      if (!pause  && !regPrevHour) {
         if (work_day.length === 0) {
           const data_work_day = {
             client: client_data,
+            brand: brand_name,
             date: new Date().toLocaleDateString('en-US'),
             startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
             endWork: '00:00',
@@ -784,7 +786,7 @@ function stopCronJobs() {
     
           work_day.push(data_work_day);
           store.set(`work-day-${uid}`, work_day);
-          console.log('Primer cliente agregado:', store.get(`work-day-${uid}`));
+          logger.info(`Primer cliente agregado: ${client_data.name}`);
           lastClient = client_data.id;
         } else {
           const lastItem = work_day[work_day.length - 1];
@@ -794,6 +796,7 @@ function stopCronJobs() {
             lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
             const data_work_day = {
               client: client_data,
+              brand: brand_name,
               date: new Date().toLocaleDateString('en-US'),
               startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
               endWork: '00:00',
@@ -814,6 +817,28 @@ function stopCronJobs() {
           }
         }
 
+      }
+
+      if (regPrevHour) {
+        logger.info('Registro de hora previa');
+        
+        activityData.presence = { status: 'active', timestamp: regPrevHour.timeStart};
+        const data_work_day = {
+          client: client_data,
+          brand: brand_name,
+          date: new Date().toLocaleDateString('en-US'),
+          startWork: convertDate(regPrevHour.timeStart.split(' ')[1]),
+          endWork: convertDate(regPrevHour.timeEnd.split(' ')[1]),
+          timeWorked: calculateTimeDifference(regPrevHour.timeStart.split(' ')[1], regPrevHour.timeEnd.split(' ')[1]),
+          task: task_name,
+          description: description,
+          userId: uid,
+          odoo_id: ' ',
+          odoo_ids: []
+        };
+        work_day.push(data_work_day);
+        work_day.sort((a, b) => a.startWork.localeCompare(b.startWork));
+        store.set(`work-day-${uid}`, work_day);
       }
 
 
@@ -861,7 +886,8 @@ function stopCronJobs() {
         });
       });
     } catch (error) {
-      console.error('Error procesando los datos:', error);
+      // console.error('Error procesando los datos:', error);
+      logger.error(`Error procesando los datos: ${error.message}`);
   
       
       BrowserWindow.getAllWindows().forEach(win => {
@@ -882,6 +908,12 @@ function stopCronJobs() {
     return work_day;
   });
 
+  ipcMain.handle('get-odoo-config', async (event) => {
+    const store = await getStore();
+    const odooConfig = store.get('odooConfig') || {};
+    return odooConfig;
+  });
+  
   ipcMain.handle('get-clients-and-pauses', async (event) => {
     const store = await getStore();
     const clients = store.get('clients') || [];
@@ -897,7 +929,7 @@ function stopCronJobs() {
 
   ipcMain.on('sendSummary' , () => {
     sendActivityUserSummary();
-    console.log('Enviando resumen de actividad');
+    logger.info('Resumen de actividad enviado manualmente');
   });
 
   ipcMain.on('login-success', () => {

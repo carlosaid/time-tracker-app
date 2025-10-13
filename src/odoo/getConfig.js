@@ -1,8 +1,8 @@
-async function getTimeNotification( session_id, url ) {
+async function getConfig( session_id, url ) {
 	
 	try {
 
-		const response = await fetch(`${url}/web/get_time_notification`, {
+		const response = await fetch(`${url}/web/get_config`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -30,5 +30,5 @@ async function getTimeNotification( session_id, url ) {
 }
 
 module.exports = {
-    getTimeNotification,
+    getConfig,
 };

@@ -162,3 +162,29 @@ select option {
 .pause {
 	display: none;
 }
+
+.time-container {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 15px;
+}
+
+.time-container label {
+	margin-bottom: 0px;
+	align-self: auto;
+}
+
+.time-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 10px; 
+}
+.hidden {
+	display: none;
+}
+.edit-input {
+  width: 60px;
+  text-align: center;
+}

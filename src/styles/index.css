@@ -162,6 +162,7 @@
 }
 
 .table-container {
+  font-size: 13px;
   overflow-x: auto;
   border-radius: 10px;
   border: 1px solid var(--border-color);
@@ -324,19 +325,22 @@ tr:nth-child(even) {
   width: 40%;
 }
 .tb-start-work{
-  width: 15%;
+  width: 13%;
 }
 .tb-description{
   width: 10%;
 }
 .tb-end-workd{
-  width: 15%;
+  width: 13%;
 }
 .tb-time-work{
   width: 10%;
 }
-.tb-actions{
+/* .tb-actions{
   width: 10%;
+} */
+.tb-brand {
+  width: 14%;
 }
 .tb-task {
   width: 20%;

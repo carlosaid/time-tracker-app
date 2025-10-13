@@ -20,16 +20,8 @@ ipcRenderer.on('timer-event',  (event, data) => {
 	const btnPause = document.getElementById('btn-pause');
 	if (data === 'pause') {
 		btnPause.textContent = 'Reanudar';
-		document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
-			btn.disabled = true ;
-			btn.style.cursor = 'not-allowed';
-    	});
 	} else {
 		btnPause.textContent = 'Pausar';
-		document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
-			btn.disabled = false ;
-			btn.style.cursor = 'pointer';
-    	});
 	}
 });
 
@@ -339,11 +331,6 @@ async function saveRow(button, originalStartTime, originalEndTime) {
 			
 		}
 	} else {
-		//CREANDO NUEVO REGISTRO
-		// // // btnSave.disabled = false;
-		// // // btnSave.style.cursor = 'pointer';
-		// btnSend.disabled = false;
-		// btnSend.style.cursor = 'pointer';
 		const selectClient = document.querySelector('.client');
 		const selectTask = document.querySelector('.task');
 		const selectClientIndex = selectClient.selectedIndex;
@@ -583,12 +570,9 @@ function addRow(button) {
 
 }
 
-function endTask(button) {
-	
-}
+
 
 function convertTo24HourFormat(time) {
-    console.log('-------------->', time)
     if (!time) return time; 
 
     const [hourMinute, period] = time.split(' ');
@@ -635,17 +619,38 @@ function convertMinutesToTime(minutes) {
     return `${String(hours).padStart(2, '0')}:${String(remainingMinutes).padStart(2, '0')}`;
 }
 
+async function getConfigOdoo() {
+    try {
+        const config = await ipcRenderer.invoke('get-odoo-config');
+        return config;
+    } catch (error) {
+        console.error('Error al obtener la configuración:', error);
+        return null;
+    }
+}
+
 async function renderWorkDayData() {
+	const configOdoo = await getConfigOdoo();
     const workDayData = await ipcRenderer.invoke('get-work-day');
     const today = new Date();
     const todayFormatted = today.toLocaleDateString('en-US');
-	const btnPause = document.getElementById('btn-pause');
-	if (btnPause.textContent === 'Reanudar') {
-		document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
-		btn.disabled = true ;
-		btn.style.cursor = 'not-allowed';
-    });
-	}
+	const btnPause = document.getElementById('btn-pause');	
+	const isPaused = btnPause.textContent === 'Reanudar';
+	const hasWorkDay = workDayData.length > 0;
+	const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+	
+	const viewPrevHourButton = now >= configOdoo.start_to_prev_hours;
+	document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
+		const PrevHourButton = btn.classList.contains('btn-add');
+		const shouldHide = isPaused || !hasWorkDay
+		
+		btn.style.display = shouldHide ? 'none' : 'block';
+		
+		if (PrevHourButton && !isPaused ) {
+			btn.style.display = viewPrevHourButton ? 'block' : 'none';
+		}
+	});
+		
     
 
     const filteredData = workDayData.filter(item => {
@@ -657,15 +662,14 @@ async function renderWorkDayData() {
 
     const tbody = document.getElementById('work-day-tbody');
     const counter = document.getElementById('counter');
-	const btnEnd = document.getElementById('btn-end');
+	
     tbody.innerHTML = '';
     if (filteredData.length === 0 ) {
         const emptyRow = document.createElement('tr');
         emptyRow.innerHTML = `<td colspan="5">No hay datos disponibles</td>`;
         tbody.appendChild(emptyRow);
-		btnEnd.style.display = 'none';
     }
-	btnEnd.style.display = filteredData.length == 0 ? 'none' : 'block';
+	
     let totalMinutes = 0;
 	const userId = localStorage.getItem('uid');
 	
@@ -675,16 +679,17 @@ async function renderWorkDayData() {
 			
 			row.innerHTML = `
 			<td>${item.client.name}</td>
+			<td>${item.brand ? item.brand : ''}</td>
 			<td class="start-time">${convertTo12HourFormat(item.startWork)}</td>
 			<td class="end-time">${convertTo12HourFormat(item.endWork)}</td>
 			<td> ${item.task} </td>
 			<td class="description">${item.description}</td>
 			<td class="time-work">${item.timeWorked}</td>
-			<td style="display:flex; gap:5px;">
-				<button class="edit-btn" style='visibility: hidden'; onclick="editRow(this)">${editIcon}</button>
-				<button class="cancel-btn" style='visibility: hidden'; onclick="deleteRow(this)">${deleteIcon}</button>
-			</td>`;
-			
+			`;
+			// <td style="display:flex; gap:5px;">
+			// 	<button class="edit-btn" style='visibility: hidden'; onclick="editRow(this)">${editIcon}</button>
+			// 	<button class="cancel-btn" style='visibility: hidden'; onclick="deleteRow(this)">${deleteIcon}</button>
+			// </td>
 			// <button class="edit-btn" onclick="editRow(this)">${editIcon}</button>
 			// <button class="cancel-btn" onclick="deleteRow(this)">${deleteIcon}</button>
 			tbody.appendChild(row);
@@ -809,6 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 });
 const btnEnd = document.getElementById('btn-end');
+const btnPrevHours = document.getElementById('btn-add')
 const btnPause = document.getElementById('btn-pause');
 document.getElementById('logout').addEventListener('click', () => {
 	btnPause.textContent = 'Pausar';
@@ -829,6 +835,10 @@ btnPause.addEventListener('click', () => {
 
 btnEnd.addEventListener('click', () => {
 	ipcRenderer.send('end-task');
+});
+
+btnPrevHours.addEventListener('click', () => {	
+	ipcRenderer.send('prev-hours')
 });
 
 function updateTime() {

@@ -1,23 +1,50 @@
 const { ipcRenderer, contextBridge } = require('electron');
+const { systemLogger } = require('../utils/systemLogs');
+const { validateTimeRange, applyHourValidation } = require('../utils/modal/validations');
+const logger = systemLogger();
 let timerEventData = null;
 let currentError = false;
-ipcRenderer.on('error-occurred', (event, error) => {
-	const messageError = document.querySelector('#error-message');
+let prevHour = false;
+function toggleAmPm(button) {
+    if (button.textContent === 'AM') {
+      button.textContent = 'PM';
+    } else {
+      button.textContent = 'AM';
+    }
+}
+
+function onCurrentError(message) {
+    const messageError = document.querySelector('#error-message');
     const button = document.querySelector('button');
     const buttonText = document.getElementById('button-text');
     const closeButton = document.querySelector('#close');
-    console.error('Error recibido desde el proceso principal:', error.message);
-	console.error('Stack Trace:', error.stack);
     document.getElementById('svg-loading').classList.add('no-loading');
     document.getElementById('svg-loading').classList.remove('loading');
     buttonText.style.display = 'block';
     button.style.pointerEvents = 'auto';
     button.style.opacity = '1';
-    closeButton.style.pointerEvents = 'auto'; // habilita clics en el SVG
+    closeButton.style.pointerEvents = 'auto';
     closeButton.style.opacity = '1';
-    messageError.textContent = 'Ha ocurrido un error. Inténtalo de nuevo.';
-
+    messageError.textContent = message;
+    ipcRenderer.send('error-modal', message);
+}
+ipcRenderer.on('error-occurred', (event, error) => {
+    console.error('Error recibido desde el proceso principal:', error.message);
+	console.error('Stack Trace:', error.stack);
+	onCurrentError('Ha ocurrido un error. Inténtalo de nuevo.')
+    ipcRenderer.send('error-modal', `Error: ${error.message}\nStack Trace: ${error.stack}`);
 });
+
+ipcRenderer.on('prev-hours', () => {
+    const timeContainer = document.getElementsByClassName('time-container')
+    timeContainer[0].classList.remove('hidden')
+    prevHour = true;
+    const timeInputs = document.querySelectorAll('.time-container input[type="text"]');
+    timeInputs.forEach(input => {
+        applyHourValidation(input);
+    });
+})
+
 ipcRenderer.on('timer-event', async (event, data) => {
     console.log('timer-event', data);
     timerEventData = data;
@@ -220,12 +247,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const formData = new FormData(event.target);
-        const description = formData.get('description');
-        const client = formData.get('client');
-        const task = formData.get('task');
-        const pause = formData.get('pause');
-        const brand = formData.get('brand');
-        ipcRenderer.send('send-data', client, description, brand, task, pause);
+        
+        const data = {
+            client: formData.get('client'),
+            description: formData.get('description'),
+            brand: formData.get('brand'),
+            task: formData.get('task'),
+            pause: formData.get('pause'),
+        };
+        
+        if (prevHour){
+
+            const { dateInit, dateEnd } = validateTimeRange(formData.get('time_start'), formData.get('time_end'))
+            
+            data.regPrevHour = {
+                timeStart: dateInit.toISOString().replace('T',' ').substring(0, 19),
+                timeEnd: dateEnd.toISOString().replace('T',' ').substring(0, 19),
+            };
+        }
+        
+        ipcRenderer.send('send-data', data);
         ipcRenderer.send('change-timer-status', timerEventData);
         ipcRenderer.once('send-data-response', () => {
             event.target.querySelector('input[name="description"]').value = '';
@@ -233,12 +274,18 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('svg-loading').classList.add('no-loading');
             document.getElementById('svg-loading').classList.remove('loading');
             buttonText.style.display = 'block';
-            closeButton.style.pointerEvents = 'auto'; // habilita clics en el SVG
+            closeButton.style.pointerEvents = 'auto'; 
             closeButton.style.opacity = '1';
             button.style.pointerEvents = 'auto';
             button.style.opacity = '1';
             divPause[0].style.display = 'none';
             pauseSelect.innerHTML = '';
+
+            const timeContainer = document.getElementsByClassName('time-container')
+            timeContainer[0].classList.add('hidden')
+            const timeInputs = document.querySelectorAll('.time-container input[type="text"]');
+            timeInputs.forEach(input => input.value = '');
+            prevHour = false;
         });
     });
     
@@ -257,6 +304,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.form-group:not(.pause)').forEach(el => {
             el.style.display = 'block';
         });
+
+        const timeContainer = document.getElementsByClassName('time-container')
+        timeContainer[0].classList.add('hidden')
+        const timeInputs = document.querySelectorAll('.time-container input[type="text"]');
+        timeInputs.forEach(input => input.value = '');
+        prevHour = false;
         
     });
 

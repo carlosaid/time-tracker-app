@@ -47,6 +47,17 @@
             <label for="description">Descripción:</label>
             <input type="text" id="description" name="description" />
           </div>
+          <div class="time-container hidden">
+            <div class="time-row">
+              <label>Inicio:</label>
+              <input name="time_start" type="text" placeholder="00:00"/>
+              <button id="btn-tm-start" type="button" class="time-mode" onclick="toggleAmPm(this)">AM</button>
+              
+              <label>Final:</label>
+              <input name="time_end" type="text" placeholder="00:00"/>
+              <button id="btn-tm-end" type="button" class="time-mode" onclick="toggleAmPm(this)">AM</button>
+            </div>
+          </div>
           <button type="submit" class="button-svg">
             <svg
               id="svg-loading"
