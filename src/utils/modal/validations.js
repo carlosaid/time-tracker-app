@@ -1,5 +1,22 @@
 const { ipcRenderer } = require('electron');
 
+function convertTo12HourFormat(time) {
+    if (!time || time === '00:00') return time; 
+    
+    
+    if (time.includes('AM') || time.includes('PM')) {
+        return time;
+    }
+    
+    
+    const [hour, minute] = time.split(':').map(Number);
+    const period = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    
+    
+    return `${hour12.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} ${period}`;
+}
+
 function validateTimeRange(startTime, endTime) {	
 	
 	if (startTime === '' || endTime === '') {
@@ -28,7 +45,7 @@ function validateTimeRange(startTime, endTime) {
 	isTraslaping = workDayData.some(item => {
 		if (item.endWork === '00:00') {
 			if ( dateInit.toTimeString().split(' ')[0].substring(0,5) >= item.startWork) {
-				onCurrentError(`Traslape de horas con ${item.startWork}-${item.endWork}`);
+				onCurrentError(`Traslape de horas con ${convertTo12HourFormat(item.startWork)}-${convertTo12HourFormat(item.endWork)}`);
 				return true
 			}
 		} else {
@@ -36,7 +53,7 @@ function validateTimeRange(startTime, endTime) {
 				dateInit.toTimeString().split(' ')[0].substring(0,5) < item.endWork && 
 				dateEnd.toTimeString().split(' ')[0].substring(0,5) > item.startWork
 			) {	
-				onCurrentError(`Traslape de horas con ${item.startWork}-${item.endWork}`);
+				onCurrentError(`Traslape de horas con ${convertTo12HourFormat(item.startWork)}-${convertTo12HourFormat(item.endWork)}`);
 				return true;
 			}
 		}

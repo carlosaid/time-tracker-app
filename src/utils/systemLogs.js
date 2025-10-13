@@ -57,19 +57,19 @@ function systemLogger() {
     info: function (msg) {
       const logEntry = `[INFO]  ${getLocalTimestamp()} - ${msg}`;
       console.log(logEntry);
-      writeToLogFile("INFO", msg);
+      // writeToLogFile("INFO", msg);
     },
 
     warn: function (msg) {
       const logEntry = `[WARN]  ${getLocalTimestamp()} - ${msg}`;
       console.warn(logEntry);
-      writeToLogFile("WARN", msg);
+      // writeToLogFile("WARN", msg);
     },
 
     error: function (msg) {
       const logEntry = `[ERROR] ${getLocalTimestamp()} - ${msg}`;
       console.error(logEntry);
-      writeToLogFile("ERROR", msg);
+      // writeToLogFile("ERROR", msg);
     },
   };
 }

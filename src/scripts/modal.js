@@ -73,6 +73,7 @@ ipcRenderer.on('timer-event', async (event, data) => {
 
 async function showClients() {
     try {
+        console.log('Obteniendo clientes...');
         const { clients } = await ipcRenderer.invoke('get-clients-and-pauses');
         const clientSelect = document.getElementById('client');
         const brandSelect = document.getElementById('brand');
@@ -117,6 +118,10 @@ async function showClients() {
 
             if (!firstValidClient) {
                 firstValidClient = client;
+            }
+
+            if (client.tasks.length === 0) {
+                taskSelect.innerHTML = '<option value="">No hay tareas disponibles</option>';
             }
         });
 
@@ -188,9 +193,11 @@ async function showClients() {
                         option.value = String(task.id);
                         option.textContent = task.name;
                         taskSelect.appendChild(option);
-                    }
+                    } 
 
                 });
+            } else {
+                taskSelect.innerHTML = '<option value="">No hay tareas disponibles</option>';
             }
         }
 
@@ -219,9 +226,14 @@ async function showClients() {
 }
 
 
-
-
 document.addEventListener('DOMContentLoaded', () => {
+    
+    window.addEventListener('storage', (event) => {
+        if (event.key === 'name') {
+            showClients();	
+        }
+	});
+
     const closeButton = document.querySelector('#close');
     const button = document.querySelector('button');
     const divPause = document.getElementsByClassName('pause');
@@ -310,6 +322,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeInputs = document.querySelectorAll('.time-container input[type="text"]');
         timeInputs.forEach(input => input.value = '');
         prevHour = false;
+        const messageError = document.querySelector('#error-message');
+        messageError.textContent = '';
+        currentError = false;
         
     });
 

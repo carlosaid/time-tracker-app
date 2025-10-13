@@ -18,7 +18,7 @@ const nodeNotifier = require('node-notifier');
 const { checkServerConnection } = require('./src/utils/checkConnection');
 const { getUserActivity } = require('./src/odoo/getUserActivity');
 const { sendDataSummary } = require('./src/odoo/sendData');
-const { getDataPause } = require('./src/odoo/getDataPuase');
+// const { getDataPause } = require('./src/odoo/getDataPuase');
 const { systemLogger } = require('./src/utils/systemLogs');
 const logger = systemLogger();
 async function getStore() {
@@ -173,19 +173,20 @@ function stopCronJobs() {
 
   async function verifyCredentialsOnStart() {
     try {
-      
+      logger.info('verify credentiansl on start');
       const { username, password, url, db , uid, session_id, timeNotification } = await getCredentials(['username', 'password', 'url', 'db', 'uid', 'session_id','timeNotification']);
 
       if (username && password) {
         logger.info(`Iniciando sesión para el usuario: ${username}`);
         try {
-          const[clients, userActivityData, odooConfig , connection, pausas] = await Promise.all([
+          const[clients, userActivityData, odooConfig , connection] = await Promise.all([
             getClients(session_id, url),
             getUserActivity(),
             getConfig(session_id, url),
             checkServerConnection(),
-            getDataPause()
+            // getDataPause()
           ]);
+          pausas = odooConfig.user_activity_pause;
           logger.info(`Configuración obtenida: ${JSON.stringify(odooConfig)}`);
           await saveCredentials(username, password, url, odooConfig.time_notification.toString()  , uid, session_id, db);
           session = true;
@@ -316,7 +317,8 @@ function stopCronJobs() {
         ]);
 
         await saveCredentials(username, password, url, odooConfig.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
-        const pauses = await getDataPause()
+        // const pauses = await getDataPause()
+        const pauses = odooConfig.user_activity_pause;
         const userActivityData = await getUserActivity();
         firstNotification();
         
