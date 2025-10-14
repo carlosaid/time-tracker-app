@@ -618,7 +618,6 @@ function stopCronJobs() {
   //ENVIAR INFO DE ACTIVIDAD
 
   ipcMain.on('change-timer-status', async (event, timerEventData) => {
-    
     getMainWindow().webContents.send('timer-event', timerEventData);
 
     if (timerEventData === 'pause') {

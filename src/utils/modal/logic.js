@@ -36,7 +36,7 @@ function validateTimeRange(startTime, endTime) {
 		onCurrentError('La hora de fin debe ser mayor a la hora de inicio');
 		return;
 	}
-	console.log(`${dateInit} > ${now} || ${dateEnd} > ${now}`)
+	
 	if ( dateInit > now || dateEnd > now ) {
 		onCurrentError('No se puede ingresar una hora mayor a la actual');
 		return;
@@ -94,5 +94,22 @@ function applyHourValidation(input) {
 	});
 }
 
+function toggleAmPm(button) {
+    button.textContent = button.textContent === 'AM' ? 'PM' : 'AM';
+}
 
-module.exports =  { validateTimeRange , applyHourValidation };
+function getLastClient() {
+	const data = JSON.parse(localStorage.getItem('workDayData')) || [];
+	const lastClient = data.length > 0 ? data[data.length - 1].client : null;
+	return lastClient;
+}
+
+function filterClients(clients, lastClient) {
+    return clients.filter(client => client.name !== '.' && (!lastClient || client.id !== lastClient.id));
+}
+
+function sortElements(elements) {
+    return elements.sort((a, b) => a.name.toLowerCase().localeCompare(b.name));
+}
+
+module.exports =  { validateTimeRange , applyHourValidation , toggleAmPm , getLastClient , filterClients , sortElements };
