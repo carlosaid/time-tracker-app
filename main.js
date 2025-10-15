@@ -33,6 +33,7 @@ let screenshotJob = null;
 let addressJob = null;
 let session = null;
 let initialTimeout = null; 
+let statusConnection = false;
 
 const activityData = {
   odoo_id: null,
@@ -234,7 +235,15 @@ function stopCronJobs() {
             const activity_task = synchronizeData.activities.find(rec => 
               rec.partner_id[0] === element.partner_id[0] && rec.task_id !== false              
             );
-            
+
+            const activity_brand = synchronizeData.activities.find(rec => 
+              rec.partner_id[0] === element.partner_id[0] && rec.brand_id !== false
+            );
+
+            const activity_pauses = synchronizeData.activities.find(rec => 
+              rec.partner_id[0] === element.partner_id[0] && rec.pause_id !== false
+            );
+            const description = activity_pauses ? activity_pauses.pause_id[1] : (activity ? activity.description : ' ');
             const todayFormatted = new Date().toLocaleDateString('en-US');
             const activitiesForSummary = groupedActivities[index] || [];
             const data_work_day = {
@@ -244,7 +253,8 @@ function stopCronJobs() {
               endWork: convertDate(element.end_time.split(' ')[1]),
               timeWorked: element.total_hours,
               task: activity_task ? activity_task.task_id[1] : ' ',
-              description: activity  ? activity.description  || ' ' : ' ',
+              description: description,
+              brand: activity_brand ? activity_brand.brand_id[1]  || ' ' : ' ',
               userId: uid,
               odoo_id: element.id,
               odoo_ids: activitiesForSummary
@@ -366,6 +376,10 @@ function stopCronJobs() {
             rec.partner_id[0] === element.partner_id[0] && rec.task_id !== false              
           );
 
+          const activity_brand = synchronizeData.activities.find(rec => 
+            rec.partner_id[0] === element.partner_id[0] && rec.brand_id !== false
+          );
+
           const todayFormatted = new Date().toLocaleDateString('en-US');
           const activitiesForSummary = groupedActivities[index] || [];
           const data_work_day = {
@@ -375,6 +389,7 @@ function stopCronJobs() {
             endWork: convertDate(element.end_time.split(' ')[1]),
             timeWorked: element.total_hours,
             task: activity_task ? activity_task.task_id[1] : ' ',
+            brand: activity_brand ? activity_brand.brand_id[1]  || ' ' : ' ',
             description: activity  ? activity.description  || ' ' : ' ',
             userId: uid,
             odoo_id: element.id,
@@ -639,6 +654,7 @@ function stopCronJobs() {
   ipcMain.on('send-data', async (event, data) => {
     const { client, description, brand, task, pause, regPrevHour = false} = data;
     logger.info(`Datos recibidos del formulario: ${JSON.stringify({ client, description, task , pause, regPrevHour })}`);
+    statusConnection = await checkServerConnection();
     try {
       const { uid } = await getCredentials(['uid']);
       const store = await getStore();
@@ -647,7 +663,7 @@ function stopCronJobs() {
       const work_day = store.get(`work-day-${uid}`) || [];
       
       //Enviar datos offlinea primero
-      if (offLineaData.length > 0) {
+      if (offLineaData.length > 0 && statusConnection.status) {
         // console.time('time-function-sendLocalData');
         await sendLocalData('offlineData', 'summary');
         await sendLocalData('offlineData', 'normal');
@@ -717,10 +733,6 @@ function stopCronJobs() {
       const modalWindows = createModalWindow();
       modalWindows.show();
 
-      // console.log('Datos recibidos del formulario:', { client, description, task , pause });
-      logger.info(`Datos recibidos del formulario: ${JSON.stringify({ client, description, task , pause })}`);
-     
-      // Asignación de datos a `activityData`
       activityData.partner_id = client;
       activityData.description = description;
       activityData.task_id = task;
@@ -843,17 +855,31 @@ function stopCronJobs() {
         store.set(`work-day-${uid}`, work_day);
       }
 
-
+      if (!statusConnection.status)  {
+        logger.warn(`Not connection to server | message: ${statusConnection.message} | data will be saved locally`);
+        BrowserWindow.getAllWindows().forEach(win => {
+          win.webContents.send('work-day-updated', work_day);
+        });
+        event.reply('send-data-response');
+        modalWindows.close();
+        return;
+      } else {
+        logger.info('Connection established with server, sending data');
+      }
+      
       const [activityDataLog, summaryDataLog] = await Promise.all([
         checkDataAndSend(activityData),
         sendActivityUserSummary(),
       ]);
+
+      
     
       if (activityDataLog.status === 400 ){
         BrowserWindow.getAllWindows().forEach(win => {
           win.webContents.send('work-day-updated', work_day);
         });  
       } else {
+        logger.info('Data submission successful');
         const userActivityData = await getUserActivity();
         store.set(`data-user-${uid}`, userActivityData);
         activityData.partner_id = null;
