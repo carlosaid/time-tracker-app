@@ -13,7 +13,7 @@ const { createLoginWindow, createMainWindow, createModalWindow, getLoginWindow, 
 const { getIpAndLocation } = require('./src/utils/getIPAddress');
 const { checkDataAndSend } = require('./src/utils/checkDataAndSend');
 const { calculateTimeDifference, convertDate } = require('./src/utils/calculateTimeDifference');
-const { sendActivityUserSummary, sendLocalData } = require('./src/utils/dataManager');
+const { sendActivityUserSummary, sendLocalData, saveDataLocally } = require('./src/utils/dataManager');
 const nodeNotifier = require('node-notifier');
 const { checkServerConnection } = require('./src/utils/checkConnection');
 const { getUserActivity } = require('./src/odoo/getUserActivity');
@@ -857,6 +857,21 @@ function stopCronJobs() {
 
       if (!statusConnection.status)  {
         logger.warn(`Not connection to server | message: ${statusConnection.message} | data will be saved locally`);
+        captureScreen(activityData)
+        const dataToSend = {
+          timestamp: activityData.presence.timestamp,
+          presence_status: activityData.presence.status,
+          screenshot: activityData.screenshot.path,
+          latitude: activityData.latitude,
+          longitude: activityData.longitude,
+          ip_address: activityData.ipAddress,
+          partner_id: activityData.partner_id || null,
+          description: activityData.description || null,
+          task_id: activityData.task_id || null,
+          brand_id : activityData.brand_id || null,
+          pause_id : activityData.pause_id || null,
+        };
+        saveDataLocally(dataToSend, 'offlineData');
         BrowserWindow.getAllWindows().forEach(win => {
           win.webContents.send('work-day-updated', work_day);
         });
