@@ -48,27 +48,27 @@ ipcRenderer.on('prev-hours', () => {
 ipcRenderer.on('timer-event', async (event, data) => {
     console.log('timer-event', data);
     timerEventData = data;
-    const divPause = document.getElementsByClassName('pause');
-    document.querySelectorAll('.form-group:not(.pause)').forEach(el => {
-        el.style.display = timerEventData === 'pause' ? 'none' : 'block';
-    });
+    // const divPause = document.getElementsByClassName('pause');
+    // document.querySelectorAll('.form-group:not(.pause)').forEach(el => {
+    //     el.style.display = timerEventData === 'pause' ? 'none' : 'block';
+    // });
 
-    if (divPause.length > 0) {
-        divPause[0].style.display = 'block';
-    }
+    // if (divPause.length > 0) {
+    //     divPause[0].style.display = 'block';
+    // }
 
-    const pauseSelect = document.getElementById('pause');
+    // const pauseSelect = document.getElementById('pause');
 
-    ipcRenderer.invoke('get-clients-and-pauses').then(({ pauses }) => {
-        pauses.forEach(pause => {
-            const option = document.createElement('option');
-            option.value = pause.id;
-            option.textContent = pause.name;
-            pauseSelect.appendChild(option);
-        });
-    }).catch(error => {
-        console.error('Error al obtener las pausas:', error);
-    });
+    // ipcRenderer.invoke('get-clients-and-pauses').then(({ pauses }) => {
+    //     pauses.forEach(pause => {
+    //         const option = document.createElement('option');
+    //         option.value = pause.id;
+    //         option.textContent = pause.name;
+    //         pauseSelect.appendChild(option);
+    //     });
+    // }).catch(error => {
+    //     console.error('Error al obtener las pausas:', error);
+    // });
 });
 
 async function showClients() {
@@ -164,6 +164,7 @@ async function showClients() {
                         const option = document.createElement('option');
                         option.value = String(task.id);
                         option.textContent = task.name;
+                        option.dataset.tag = task.task_tags;
                         taskSelect.appendChild(option);
                     }
                     
@@ -192,6 +193,7 @@ async function showClients() {
                         const option = document.createElement('option');
                         option.value = String(task.id);
                         option.textContent = task.name;
+                        option.dataset.tag = task.task_tags;
                         taskSelect.appendChild(option);
                     } 
 
@@ -267,6 +269,21 @@ document.addEventListener('DOMContentLoaded', () => {
             task: formData.get('task'),
             pause: formData.get('pause'),
         };
+
+        const taskSelect = document.querySelector('[name="task"]');
+        const selectedOption = taskSelect.options[taskSelect.selectedIndex];
+        const tags = (selectedOption.dataset.tag || '')
+            .split(',')
+            .map(t => t.trim())
+            .filter(Boolean);
+
+        if (tags.length > 0) {
+            tags.forEach(tag => {
+                if (tag == 'pausa' && timerEventData != 'resume') {
+                    timerEventData = 'pause'
+                }
+            });
+        }
         
         if (prevHour){
 

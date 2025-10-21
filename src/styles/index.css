@@ -432,3 +432,7 @@ tr:nth-child(even) {
    font-size: 18px;
   /*bottom: 5px; */
 }
+
+.hidden {
+  display: none;
+}

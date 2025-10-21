@@ -15,13 +15,27 @@ ipcRenderer.on('info-send', (event, message) => {
 	console.info(message);
 });
 
+ipcRenderer.on('ws-message', (event, msg) => {
+	msg_json = JSON.parse(msg.toString());
+	console.log(msg_json);
+	if (msg_json.type === 'permission_previous_hours') {
+		console.log('Habilitando botón de horas anteriores');
+		// const btnPause = document.getElementById('btn-pause');
+		// btnPause.style.display = 'none';
+	}
+	
+});
 
 ipcRenderer.on('timer-event',  (event, data) => {
-	const btnPause = document.getElementById('btn-pause');
+	// const btnPause = document.getElementById('btn-pause');
+	// if (data === 'pause') {
+	// 	btnPause.textContent = 'Reanudar';
+	// } else {
+	// 	btnPause.textContent = 'Pausar';
+	// }
+	const btnAction = document.getElementById('btn-end');
 	if (data === 'pause') {
-		btnPause.textContent = 'Reanudar';
-	} else {
-		btnPause.textContent = 'Pausar';
+		btnAction.dataset.state = 'in-pause'
 	}
 });
 
@@ -634,24 +648,47 @@ async function renderWorkDayData() {
     const workDayData = await ipcRenderer.invoke('get-work-day');
     const today = new Date();
     const todayFormatted = today.toLocaleDateString('en-US');
-	const btnPause = document.getElementById('btn-pause');	
-	const isPaused = btnPause.textContent === 'Reanudar';
-	const hasWorkDay = workDayData.length > 0;
-	const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+	const btnPrevHour = document.getElementById('btn-add');
+	// const btnPause = document.getElementById('btn-pause');	
+	// const isPaused = btnPause.textContent === 'Reanudar';
+	// const hasWorkDay = workDayData.length > 0;
+	// const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
 	
-	const viewPrevHourButton = now >= configOdoo.start_to_prev_hours;
-	document.querySelectorAll('.btn-add, .btn-end').forEach(btn => {
-		const PrevHourButton = btn.classList.contains('btn-add');
-		const shouldHide = isPaused || !hasWorkDay
+	// const viewPrevHourButton = now >= configOdoo.start_to_prev_hours;
+	// document.querySelectorAll('.btn-end').forEach(btn => {
+	// 	const shouldHide = !hasWorkDay
+	// 	if (shouldHide) {
+	// 		btn.classList.add('hidden');
+	// 	} else {
+	// 		btn.classList.remove('hidden');
+	// 	}
+	// 	// btn.classList.remove('hidden');
+	// 	// btn.style.display = shouldHide ? 'none' : 'block';
 		
-		btn.style.display = shouldHide ? 'none' : 'block';
-		
-		if (PrevHourButton && !isPaused ) {
-			btn.style.display = viewPrevHourButton ? 'block' : 'none';
+	// });
+	const nowDeactivation = new Date();
+	function updatePrevHourButton() {
+		const now = new Date();
+		const deactivationHour = 23	; 
+		if (
+			now.getDate() > nowDeactivation.getDate() ||
+			now.getHours() >= deactivationHour || 
+			!configOdoo.activate_reg_prev_hour
+		) {
+			btnPrevHour.classList.add('hidden');
+		} else {
+			btnPrevHour.classList.remove('hidden');
 		}
-	});
-		
-    
+	}
+	if (configOdoo.activate_reg_prev_hour) {
+		setInterval(updatePrevHourButton, 1000 * 60);
+		updatePrevHourButton();
+	} else {
+		btnPrevHour.classList.add('hidden');
+	}
+	
+
+
 
     const filteredData = workDayData.filter(item => {
         const itemDate = item.date;
@@ -701,43 +738,7 @@ async function renderWorkDayData() {
     counter.textContent = convertMinutesToTime(totalMinutes);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const closeButton = document.getElementById('close');
-    closeButton.addEventListener('click', () => {
-        ipcRenderer.send('close-main-window');
-    });
 
-    const usernameDiv = document.getElementById('username');
-    const profileImage = document.getElementById('profileImage');
-    if (usernameDiv) {
-        usernameDiv.textContent = localStorage.getItem('name');
-        window.addEventListener('storage', (event) => {
-            if (event.key === 'name') {
-                const username = localStorage.getItem('name');
-                usernameDiv.textContent = username;
-            }
-        });
-    }
-
-    if (profileImage) {
-        profileImage.src = localStorage.getItem('imageBase64');
-        window.addEventListener('storage', (event) => {
-            if (event.key === 'imageBase64') {
-                const imageBase64 = localStorage.getItem('imageBase64');
-                profileImage.src = imageBase64;
-            }
-        });
-    }
-
-    renderWorkDayData();
-    ipcRenderer.on('work-day-updated', () => {
-        renderWorkDayData();
-        const btnSave = document.querySelector('.btn-add');
-        btnSave.disabled = false;
-        btnSave.style.cursor = 'pointer';
-        btnSave.value = 'create';
-    });
-});
 
 document.getElementById('logout').addEventListener('click', () => {
     ipcRenderer.send('logout');
@@ -815,25 +816,32 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 const btnEnd = document.getElementById('btn-end');
 const btnPrevHours = document.getElementById('btn-add')
-const btnPause = document.getElementById('btn-pause');
+// const btnPause = document.getElementById('btn-pause');
 document.getElementById('logout').addEventListener('click', () => {
-	btnPause.textContent = 'Pausar';
+	// btnPause.textContent = 'Pausar';
 	ipcRenderer.send('logout');
 });
 
 
 
 
-btnPause.addEventListener('click', () => {
-    if (btnPause.textContent === "Pausar") {
-        ipcRenderer.send('pause-timer');
-    } 
-	if (btnPause.textContent === "Reanudar") {
-        ipcRenderer.send('resume-timer')
-    }
-});
+// btnPause.addEventListener('click', () => {
+//     if (btnPause.textContent === "Pausar") {
+//         ipcRenderer.send('pause-timer');
+//     } 
+// 	if (btnPause.textContent === "Reanudar") {
+//         ipcRenderer.send('resume-timer')
+//     }
+// });
+
 
 btnEnd.addEventListener('click', () => {
+	
+	if (btnEnd.dataset.state === 'in-pause') {
+		ipcRenderer.send('resume-timer')
+		btnEnd.dataset.state = 'normal'
+	}
+
 	ipcRenderer.send('end-task');
 });
 

@@ -18,6 +18,12 @@ function convertTo12HourFormat(time) {
 }
 
 function validateTimeRange(startTime, endTime) {	
+	if (startTime.length <= 2) {
+		startTime = startTime.padStart(2, '0') + ':00';
+	}
+	if (endTime.length <= 2) {
+		endTime = endTime.padStart(2, '0') + ':00';
+	}
 	
 	if (startTime === '' || endTime === '') {
 		ipcRenderer.send('error-modal', 'Por favor ingresa una hora correcta');
