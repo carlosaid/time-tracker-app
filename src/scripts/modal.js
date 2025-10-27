@@ -279,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (tags.length > 0) {
             tags.forEach(tag => {
-                if (tag == 'pausa' && timerEventData != 'resume') {
+                if (tag.toLowerCase() == 'pausa' && timerEventData != 'resume') {
                     timerEventData = 'pause'
                 }
             });

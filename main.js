@@ -135,6 +135,7 @@ if (!gotTheLock) {
   // }
 
   async function setupCronJobs() {
+    logger.info('Cron Jobs configurados');
     const { timeNotification } = await getCredentials(['timeNotification']);
     if (!timeNotification) return;
     const intervalMinutes = parseInt(timeNotification);
@@ -633,10 +634,10 @@ function stopCronJobs() {
   //ENVIAR INFO DE ACTIVIDAD
 
   ipcMain.on('change-timer-status', async (event, timerEventData) => {
-    
+    logger.info(`Evento de temporizador recibido: ${timerEventData}`);
     getMainWindow().webContents.send('timer-event', timerEventData);
-
     if (timerEventData === 'pause') {
+      logger.info('Timer en pausa, deteniendo cron jobs');
       stopCronJobs();
       updateActivityPresence();
     }
@@ -805,7 +806,7 @@ function stopCronJobs() {
         } else {
           const lastItem = work_day[work_day.length - 1];
     
-          if (lastItem.client.id !== client_data.id) {
+          if (lastItem.client.id !== client_data.id || lastItem.brand !== brand_name || lastItem.task !== task_name) {
             lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
             lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
             const data_work_day = {
