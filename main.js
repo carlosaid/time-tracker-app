@@ -34,6 +34,10 @@ let addressJob = null;
 let session = null;
 let initialTimeout = null; 
 let statusConnection = false;
+let currentNotificationMinutes = null;
+let pauseAutoResumeTimeout = null;
+let pauseAutoResumeMinutes = null;
+let isPaused = false;
 
 const activityData = {
   odoo_id: null,
@@ -134,11 +138,11 @@ if (!gotTheLock) {
   //   }
   // }
 
-  async function setupCronJobs() {
+  async function setupCronJobs(intervalMinutes) {
+    if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+      return;
+    }
     logger.info('Cron Jobs configurados');
-    const { timeNotification } = await getCredentials(['timeNotification']);
-    if (!timeNotification) return;
-    const intervalMinutes = parseInt(timeNotification);
     const intervalMs = intervalMinutes * 60 * 1000;
     const now = new Date();
     const minutes = now.getMinutes();
@@ -149,10 +153,10 @@ if (!gotTheLock) {
     if (initialTimeout) clearTimeout(initialTimeout);
 
     initialTimeout = setTimeout(() => {
-        presenceNotification(activityData);
-        captureScreen(activityData);
-        getIpAndLocation(activityData);
-      
+      presenceNotification(activityData);
+      captureScreen(activityData);
+      getIpAndLocation(activityData);
+
       presenceJob = setInterval(() => presenceNotification(activityData), intervalMs);
       screenshotJob = setInterval(() => captureScreen(activityData), intervalMs);
       addressJob = setInterval(() => getIpAndLocation(activityData), intervalMs);
@@ -173,10 +177,36 @@ function stopCronJobs() {
   presenceJob = screenshotJob = addressJob = null;
 }
 
+function clearPauseAutoResume() {
+  if (pauseAutoResumeTimeout) {
+    clearTimeout(pauseAutoResumeTimeout);
+    pauseAutoResumeTimeout = null;
+  }
+}
+
+function schedulePauseAutoResume() {
+  clearPauseAutoResume();
+  if (!Number.isFinite(pauseAutoResumeMinutes) || pauseAutoResumeMinutes <= 0) {
+    return;
+  }
+
+  pauseAutoResumeTimeout = setTimeout(() => {
+    pauseAutoResumeTimeout = null;
+    logger.info('Auto reanudando por tiempo de pausa');
+    const mainWindow = getMainWindow();
+    if (mainWindow) {
+      mainWindow.webContents.send('timer-event', 'resume');
+    }
+    updateActivityPresence();
+    presenceNotification(activityData);
+    setupCronJobs(currentNotificationMinutes);
+  }, pauseAutoResumeMinutes * 60 * 1000);
+}
+
   async function verifyCredentialsOnStart() {
     try {
       logger.info('verify credentiansl on start');
-      const { username, password, url, db , uid, session_id, timeNotification } = await getCredentials(['username', 'password', 'url', 'db', 'uid', 'session_id','timeNotification']);
+      const { username, password, url, db , uid, session_id } = await getCredentials(['username', 'password', 'url', 'db', 'uid', 'session_id']);
 
       if (username && password) {
         logger.info(`Iniciando sesión para el usuario: ${username}`);
@@ -285,7 +315,7 @@ function stopCronJobs() {
       
       createMainWindow();
       firstNotification();
-      setupCronJobs();  
+      setupCronJobs(currentNotificationMinutes);  
         
       } else {
         createLoginWindow();
@@ -637,13 +667,17 @@ function stopCronJobs() {
     logger.info(`Evento de temporizador recibido: ${timerEventData}`);
     getMainWindow().webContents.send('timer-event', timerEventData);
     if (timerEventData === 'pause') {
+      isPaused = true;
       logger.info('Timer en pausa, deteniendo cron jobs');
       stopCronJobs();
       updateActivityPresence();
+      schedulePauseAutoResume();
     }
 
     if (timerEventData === 'resume') {
-      setupCronJobs();
+      isPaused = false;
+      clearPauseAutoResume();
+      setupCronJobs(currentNotificationMinutes);
       updateActivityPresence();
     }
   })
@@ -742,9 +776,52 @@ function stopCronJobs() {
       activityData.presence = { status: 'active', timestamp: new Date().toISOString().replace('T',' ').substring(0, 19) };
   
       const client_data = store.get('clients').find(rec => rec.id == client);
-      const task_name = client_data['tasks'].find( rec => rec.id === parseInt(task))?.name || ' ';
+      const selectedTask = client_data?.tasks?.find(rec => rec.id === parseInt(task));
+      const task_name = selectedTask?.name || ' ';
       const brand_name = client_data['brands'].find( rec => rec.id === parseInt(brand))?.name || ' ';
       let lastClient = null;
+      
+      let taskTags = [];
+      const rawTaskTags = selectedTask?.task_tags;
+      if (Array.isArray(rawTaskTags)) {
+        taskTags = rawTaskTags
+          .map(tag => String(tag).trim().toLowerCase())
+          .filter(Boolean);
+      } else if (typeof rawTaskTags === 'string') {
+        taskTags = rawTaskTags
+          .split(',')
+          .map(tag => tag.trim().toLowerCase())
+          .filter(Boolean);
+      }
+      const isPauseTask = taskTags.includes('pausa');
+      if (isPauseTask) {
+        if (selectedTask && Number.isFinite(Number(selectedTask.time_notification))) {
+          pauseAutoResumeMinutes = Number(selectedTask.time_notification);
+          if (isPaused) {
+          logger.info(`Pausa reanudar notificación en: ${pauseAutoResumeMinutes} minutos`);
+            schedulePauseAutoResume();
+          }
+        } else {
+          pauseAutoResumeMinutes = null;
+          clearPauseAutoResume();
+        }
+      } else {
+        pauseAutoResumeMinutes = null;
+        clearPauseAutoResume();
+
+        if (selectedTask && Number.isFinite(Number(selectedTask.time_notification))) {
+          const newInterval = Number(selectedTask.time_notification);
+          logger.info(`Intervalo de notificación para la tarea: ${newInterval} minutos`);
+          if (currentNotificationMinutes !== newInterval) {
+            currentNotificationMinutes = newInterval;
+            stopCronJobs();
+            setupCronJobs(currentNotificationMinutes);
+          }
+        } else {
+          currentNotificationMinutes = null;
+          stopCronJobs();
+        }
+      }
       
       if (pause > 0) {
         const lastPause = work_day.find(rec => rec.pause === true);
@@ -979,7 +1056,7 @@ function stopCronJobs() {
   ipcMain.on('login-success', () => {
     createMainWindow();
     session = true;
-    setupCronJobs();
+    setupCronJobs(currentNotificationMinutes);
 
     const loginWindow = getLoginWindow();
     if (loginWindow) {
