@@ -27,6 +27,15 @@ async function getStore() {
 }
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
+
+function broadcastUpdateStatus(payload) {
+  const windows = BrowserWindow.getAllWindows();
+  windows.forEach(win => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('update-status', payload);
+    }
+  });
+}
 let tray;
 let presenceJob = null;
 let screenshotJob = null;
@@ -448,37 +457,34 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
       }
     });
   });
-  //#NOTE Actulización con mensajes de información, solo son mensajes informativos
-  // // // autoUpdater.on("update-available", (info) => {
-  // // //   nodeNotifier.notify({
-  // // //     title: 'Actualización disponible',
-  // // //     message: 'Hay una actualización disponible para la aplicación',
-  // // //     icon: path.join(__dirname, './src/assets/img/timer-ticker-ico.png'),
-  // // //     sound: true,
-  // // //     wait: true
-  // // //   });
-  // // //   autoUpdater.downloadUpdate(); 
-  // // //   tray.setToolTip('comenzando la descarga'); // Descarga la actualización
-  // // // });
-  
-  // // // autoUpdater.on("update-downloaded", (info) => {
-  // // //   nodeNotifier.notify({
-  // // //     title: 'Actualización descargada',
-  // // //     message: 'La actualización ha sido descargada y está lista para ser instalada, cierra la aplicación para instalarla',
-  // // //     icon: path.join(__dirname, './src/assets/img/timer-ticker-ico.png'),
-  // // //     sound: true,
-  // // //     wait: true
-  // // //   });
-  // // // });
+  autoUpdater.on('update-available', () => {
+    broadcastUpdateStatus({ state: 'available' });
+    if (tray) {
+      tray.setToolTip('Actualización disponible. Descargando...');
+    }
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    broadcastUpdateStatus({ state: 'idle' });
+  });
 
   autoUpdater.on('download-progress', (progressObj) => {
     const { percent } = progressObj;
-  
-    tray.setToolTip(`Descargando actualización... ${percent.toFixed(2)}%`);
- 
+    broadcastUpdateStatus({ state: 'downloading', percent });
+    if (tray) {
+      tray.setToolTip(`Descargando actualización... ${percent.toFixed(2)}%`);
+    }
   });
 
-  autoUpdater.on("error", (info) => {
+  autoUpdater.on('update-downloaded', () => {
+    broadcastUpdateStatus({ state: 'downloaded' });
+    setTimeout(() => {
+      autoUpdater.quitAndInstall(true, true);
+    }, 5000);
+  });
+
+  autoUpdater.on('error', (info) => {
+    broadcastUpdateStatus({ state: 'error', message: String(info) });
     nodeNotifier.notify({
       title: 'Error en la actualización',
       message: `Error durante la actualización: ${info}`,
@@ -486,8 +492,6 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
       sound: true,
       wait: true
     });
-
-
   });
 
   ipcMain.on('minimize-login-window', () => {
