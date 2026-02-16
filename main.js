@@ -151,15 +151,14 @@ if (!gotTheLock) {
     if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
       return;
     }
-    logger.info('Cron Jobs configurados');
+    logger.info('Cron Jobs configured');
     const intervalMs = intervalMinutes * 60 * 1000;
     const now = new Date();
-    const minutes = now.getMinutes();
-    const remainder = minutes % intervalMinutes;
-    const minutesToNext = remainder === 0 ? intervalMinutes : intervalMinutes - remainder;
-    const msToNext = minutesToNext * 60 * 1000 - (now.getSeconds() * 1000 + now.getMilliseconds());
 
     if (initialTimeout) clearTimeout(initialTimeout);
+
+    const nextNotification = new Date(now.getTime() + intervalMs);
+    logger.info(`Next notification will be at ${nextNotification.toLocaleString('en-US', { hour12: false })}`);
 
     initialTimeout = setTimeout(() => {
       presenceNotification(activityData);
@@ -170,7 +169,7 @@ if (!gotTheLock) {
       screenshotJob = setInterval(() => captureScreen(activityData), intervalMs);
       addressJob = setInterval(() => getIpAndLocation(activityData), intervalMs);
       initialTimeout = null;
-    }, msToNext);
+    }, intervalMs);
 }
 
 function stopCronJobs() {
