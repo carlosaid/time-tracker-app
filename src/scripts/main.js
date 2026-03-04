@@ -948,6 +948,19 @@ btnPrevHours.addEventListener('click', () => {
 	ipcRenderer.send('prev-hours')
 });
 
+async function updateAppVersion() {
+	const appVersionEl = document.getElementById('app-version');
+	if (!appVersionEl) {
+		return;
+	}
+	try {
+		const version = await ipcRenderer.invoke('get-app-version');
+		appVersionEl.textContent = version ? `v${version} | ` : '';
+	} catch (error) {
+		appVersionEl.textContent = '';
+	}
+}
+
 function updateTime() {
 	const currentTime = new Date().toLocaleString('en-US', { 
 		year: 'numeric', month: '2-digit', day: '2-digit',
@@ -956,7 +969,8 @@ function updateTime() {
 	document.getElementById('date').textContent = currentTime; 
   }
   
-  setInterval(updateTime, 1000);
+updateAppVersion();
+setInterval(updateTime, 1000);
 updateTime();
 
 

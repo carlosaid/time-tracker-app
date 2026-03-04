@@ -211,57 +211,74 @@ function schedulePauseAutoResume() {
   }, pauseAutoResumeMinutes * 60 * 1000);
 }
 
-function buildWorkDayFromOdooData(synchronizeData, uid) {
+function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
   const activities = Array.isArray(synchronizeData?.activities) ? synchronizeData.activities : [];
-  const summaries = Array.isArray(synchronizeData?.summaries) ? synchronizeData.summaries : [];
-  const activitiesSorted = [...activities].sort(
-    (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-  );
-  const summarySorted = [...summaries].sort(
-    (a, b) => new Date(a.start_time) - new Date(b.start_time)
-  );
-
   const rows = [];
   let current = null;
-
-  const getActivityTime = activity => {
-    if (!activity?.timestamp) return null;
-    const activityTime = new Date(activity.timestamp);
-    return Number.isNaN(activityTime) ? null : activityTime;
+  const toDate = (rawValue) => {
+    if (!rawValue) return null;
+    let normalized = String(rawValue).trim();
+    if (normalized.includes(' ') && !normalized.includes('T')) {
+      normalized = normalized.replace(' ', 'T');
+    }
+    if (!/[zZ]$|[+\-]\d{2}:\d{2}$/.test(normalized)) {
+      normalized = `${normalized}Z`;
+    }
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   };
 
-  activitiesSorted.forEach(activity => {
-    const activityTime = getActivityTime(activity);
+  const getTimePart = (rawValue) => {
+    if (!rawValue) return null;
+    const textValue = String(rawValue);
+    if (textValue.includes(' ')) {
+      return textValue.split(' ')[1].substring(0, 8);
+    }
+    if (textValue.includes('T')) {
+      return textValue.split('T')[1].replace('Z', '').substring(0, 8);
+    }
+    return null;
+  };
+
+  const formatDuration = (milliseconds) => {
+    const totalMinutes = Math.max(0, Math.floor(milliseconds / 60000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  };
+
+  const activitiesSorted = [...activities]
+    .filter(activity => activity?.timestamp)
+    .sort((a, b) => {
+      const aDate = toDate(a.timestamp);
+      const bDate = toDate(b.timestamp);
+      if (!aDate || !bDate) return 0;
+      return aDate - bDate;
+    });
+
+  activitiesSorted.forEach((activity, index) => {
+    const status = String(activity.presence_status || '').toLowerCase();
+    const activityTime = toDate(activity.timestamp);
+    const nextActivity = activitiesSorted[index + 1];
+    const nextActivityTime = toDate(nextActivity?.timestamp);
     if (!activityTime) return;
+
+    if (status !== 'active') {
+      current = null;
+      return;
+    }
 
     const clientId = activity.partner_id?.[0] || 0;
     const clientName = activity.partner_id?.[1] || ' ';
     const taskName = activity.task_id ? activity.task_id[1] : ' ';
+    const intervalTask = clients.find(rec => rec.id === clientId)?.tasks?.find(t => t.name === taskName)?.time_notification || null;
     const brandName = activity.brand_id ? activity.brand_id[1] || ' ' : ' ';
     const description = activity.pause_id ? activity.pause_id[1] : (activity.description || ' ');
+    const activityTimePart = getTimePart(activity.timestamp);
+    if (!activityTimePart) return;
+    const activityTimeLocal = convertDate(activityTimePart);
 
-    if (!current) {
-      current = {
-        client: { id: clientId, name: clientName },
-        date: new Date().toLocaleDateString('en-US'),
-        startWork: convertDate(activity.timestamp.split(' ')[1]),
-        endWork: convertDate(activity.timestamp.split(' ')[1]),
-        timeWorked: '00:00',
-        task: taskName,
-        description: description,
-        brand: brandName,
-        userId: uid,
-        odoo_id: ' ',
-        odoo_ids: [activity.id],
-        startTimestamp: activityTime,
-        endTimestamp: activityTime,
-        partnerId: clientId
-      };
-      rows.push(current);
-      return;
-    }
-
-    const isSameGroup =
+    const isSameGroup = current &&
       current.client.id === clientId &&
       current.brand === brandName &&
       current.task === taskName;
@@ -270,73 +287,42 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
       current = {
         client: { id: clientId, name: clientName },
         date: new Date().toLocaleDateString('en-US'),
-        startWork: convertDate(activity.timestamp.split(' ')[1]),
-        endWork: convertDate(activity.timestamp.split(' ')[1]),
+        startWork: activityTimeLocal,
+        endWork: activityTimeLocal,
         timeWorked: '00:00',
         task: taskName,
-        description: description,
+        description,
         brand: brandName,
         userId: uid,
         odoo_id: ' ',
         odoo_ids: [activity.id],
-        startTimestamp: activityTime,
-        endTimestamp: activityTime,
-        partnerId: clientId
+        activeDurationMs: 0,
       };
       rows.push(current);
-      return;
+    } else {
+      current.endWork = activityTimeLocal;
+      current.description = description;
+      current.odoo_ids.push(activity.id);
     }
-
-    current.endWork = convertDate(activity.timestamp.split(' ')[1]);
-    current.endTimestamp = activityTime;
-    current.timeWorked = calculateTimeDifference(current.startWork, current.endWork);
-    current.description = description;
-    current.odoo_ids.push(activity.id);
-  });
-
-  if (rows.length === 0 && summarySorted.length === 0) {
-    return [];
-  }
-
-  if (rows.length === 0) {
-    return summarySorted.map(summary => ({
-      client: { id: summary.partner_id[0], name: summary.partner_id[1] },
-      date: new Date().toLocaleDateString('en-US'),
-      startWork: convertDate(summary.start_time.split(' ')[1]),
-      endWork: convertDate(summary.end_time.split(' ')[1]),
-      timeWorked: summary.total_hours,
-      task: ' ',
-      description: ' ',
-      brand: ' ',
-      userId: uid,
-      odoo_id: summary.id,
-      odoo_ids: []
-    }));
-  }
-
-  const usedSummaries = new Set();
-
-  rows.forEach(row => {
-    const summary = summarySorted.find(candidate => {
-      if (usedSummaries.has(candidate.id)) return false;
-      if (candidate.partner_id?.[0] !== row.partnerId) return false;
-      const summaryStart = new Date(candidate.start_time);
-      const summaryEnd = new Date(candidate.end_time);
-      if (Number.isNaN(summaryStart) || Number.isNaN(summaryEnd)) return false;
-      return row.startTimestamp >= summaryStart && row.endTimestamp <= summaryEnd;
-    });
-
-    if (summary) {
-      usedSummaries.add(summary.id);
-      row.odoo_id = summary.id;
-      row.endWork = convertDate(summary.end_time.split(' ')[1]);
-      row.timeWorked = summary.total_hours;
-      row.endTimestamp = new Date(summary.end_time);
+    
+    if (nextActivityTime && nextActivityTime > activityTime) {
+      const nextTimePart = getTimePart(nextActivity.timestamp);
+      current.activeDurationMs += (nextActivityTime - activityTime);
+      
+      if (nextTimePart && intervalTask && Math.round((nextActivityTime - activityTime) / 60000) <= intervalTask + 10) {
+        current.endWork = convertDate(nextTimePart);
+        current.timeWorked = formatDuration(current.activeDurationMs);  
+        
+      }
+      else {
+        current.timeWorked = "00:00";
+        current.endWork = convertDate(activityTimePart);
+      }
     }
   });
 
   return rows.map(row => {
-    const { startTimestamp, endTimestamp, partnerId, ...cleanRow } = row;
+    const { activeDurationMs, ...cleanRow } = row;
     return cleanRow;
   });
 }
@@ -365,7 +351,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
           const work_day = store.get(`work-day-${uid}`) || [];
           store.set(`data-user-${uid}`, userActivityData);
           const synchronizeData = store.get(`data-user-${uid}`) || { summaries: [], activities: [] };
-          const data = buildWorkDayFromOdooData(synchronizeData, uid);
+          const data = buildWorkDayFromOdooData(synchronizeData, uid, clients);
           data.sort((a, b) => a.startWork.localeCompare(b.startWork));
           store.set(`work-day-${uid}`, data);
           
@@ -437,7 +423,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
         const work_day = store.get(`work-day-${uid}`) || [];
         store.set(`data-user-${uid}`, userActivityData);
         const synchronizeData = store.get(`data-user-${uid}`) || { summaries: [], activities: [] };
-        const data = buildWorkDayFromOdooData(synchronizeData, uid);
+        const data = buildWorkDayFromOdooData(synchronizeData, uid, clients);
         data.sort((a, b) => a.startWork.localeCompare(b.startWork));
         store.set(`work-day-${uid}`, data);
 
@@ -698,6 +684,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
       const { uid } = await getCredentials(['uid']);
       const store = await getStore();
       const offLineaData = store.get('offlineData') || [];
+      const clients = store.get('clients') || [];
       // console.log(offLineaData.length);
       const work_day = store.get(`work-day-${uid}`) || [];
       
@@ -709,7 +696,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
         // console.timeEnd('time-function-sendLocalData');
         const synchronizeData = await getUserActivity();
         // console.log(synchronizeData)
-        const data = buildWorkDayFromOdooData(synchronizeData, uid);
+        const data = buildWorkDayFromOdooData(synchronizeData, uid, clients);
         data.sort((a, b) => a.startWork.localeCompare(b.startWork));
         store.set(`work-day-${uid}`, data);
 
@@ -728,7 +715,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
       activityData.pause_id = pause;
       activityData.presence = { status: 'active', timestamp: new Date().toISOString().replace('T',' ').substring(0, 19) };
   
-      const client_data = store.get('clients').find(rec => rec.id == client);
+      const client_data = clients.find(rec => rec.id == client);
       const selectedTask = client_data?.tasks?.find(rec => rec.id === parseInt(task));
       const task_name = selectedTask?.name || ' ';
       const brand_name = client_data['brands'].find( rec => rec.id === parseInt(brand))?.name || ' ';
@@ -763,10 +750,9 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
         clearPauseAutoResume();
 
         if (selectedTask && Number.isFinite(Number(selectedTask.time_notification))) {
-          const newInterval = Number(selectedTask.time_notification);
-          logger.info(`Intervalo de notificación para la tarea: ${newInterval} minutos`);
-          if (currentNotificationMinutes !== newInterval) {
-            currentNotificationMinutes = newInterval;
+          currentNotificationMinutes = Number(selectedTask.time_notification);
+          logger.info(`Intervalo de notificación para la tarea: ${currentNotificationMinutes} minutos`);
+          if (!regPrevHour) {
             stopCronJobs();
             setupCronJobs(currentNotificationMinutes);
           }
@@ -993,6 +979,10 @@ function buildWorkDayFromOdooData(synchronizeData, uid) {
     const clients = store.get('clients') || [];
     const pauses = store.get('pauses') || [];
     return {clients, pauses};
+  });
+
+  ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
   });
 
   ipcMain.on('delete_data', async () => {
