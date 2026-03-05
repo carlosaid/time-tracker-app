@@ -240,6 +240,15 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     return null;
   };
 
+  const updateDescription = (activity, nextActivity) => {
+    if (activity.partner_id?.[0] === nextActivity.partner_id?.[0] && activity.brand_id?.[1] === nextActivity.brand_id?.[1] && activity.task_id?.[1] === nextActivity.task_id?.[1]) {
+      return nextActivity.description || activity.description;
+    } 
+    else {
+      return activity.description;
+    }
+  }
+
   const formatDuration = (milliseconds) => {
     const totalMinutes = Math.max(0, Math.floor(milliseconds / 60000));
     const hours = Math.floor(totalMinutes / 60);
@@ -263,15 +272,10 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     const nextActivityTime = toDate(nextActivity?.timestamp);
     if (!activityTime) return;
 
-    if (status !== 'active') {
-      current = null;
-      return;
-    }
-
     const clientId = activity.partner_id?.[0] || 0;
     const clientName = activity.partner_id?.[1] || ' ';
     const taskName = activity.task_id ? activity.task_id[1] : ' ';
-    const intervalTask = clients.find(rec => rec.id === clientId)?.tasks?.find(t => t.name === taskName)?.time_notification || null;
+    const intervalTask = clients.find(rec => rec.id === clientId)?.tasks?.find(t => t.name === taskName)?.time_notification || 40;
     const brandName = activity.brand_id ? activity.brand_id[1] || ' ' : ' ';
     const description = activity.pause_id ? activity.pause_id[1] : (activity.description || ' ');
     const activityTimePart = getTimePart(activity.timestamp);
@@ -282,7 +286,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       current.client.id === clientId &&
       current.brand === brandName &&
       current.task === taskName;
-
+    // Crear nuevo registro si no es es del mismo grupo
     if (!isSameGroup) {
       current = {
         client: { id: clientId, name: clientName },
@@ -299,20 +303,35 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         activeDurationMs: 0,
       };
       rows.push(current);
-    } else {
-      current.endWork = activityTimeLocal;
-      current.description = description;
-      current.odoo_ids.push(activity.id);
     }
     
     if (nextActivityTime && nextActivityTime > activityTime) {
+
       const nextTimePart = getTimePart(nextActivity.timestamp);
       current.activeDurationMs += (nextActivityTime - activityTime);
       
       if (nextTimePart && intervalTask && Math.round((nextActivityTime - activityTime) / 60000) <= intervalTask + 10) {
         current.endWork = convertDate(nextTimePart);
-        current.timeWorked = formatDuration(current.activeDurationMs);  
-        
+        current.timeWorked = formatDuration(current.activeDurationMs);
+        current.description = updateDescription(activity, nextActivity);
+
+      }
+      else if (nextTimePart && intervalTask && Math.round((nextActivityTime - activityTime) / 60000) > intervalTask + 10) {
+        current = {
+        client: { id: nextActivity.partner_id?.[0] || 0, name: nextActivity.partner_id?.[1] || ' ' },
+        date: new Date().toLocaleDateString('en-US'),
+        startWork: convertDate(nextTimePart),
+        endWork: convertDate(nextTimePart),
+        timeWorked: '00:00',
+        task: nextActivity.task_id ? nextActivity.task_id[1] : ' ',
+        description: nextActivity.description,
+        brand: nextActivity.brand_id ? nextActivity.brand_id[1] || ' ' : ' ',
+        userId: uid,
+        odoo_id: ' ',
+        odoo_ids: [activity.id],
+        activeDurationMs: 0,
+      };
+        rows.push(current);
       }
       else {
         current.timeWorked = "00:00";
@@ -502,29 +521,53 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     //obtener datos de la ultima actividad:
     const store = await getStore();
     const { uid } = await getCredentials(['uid']);
-    const work_day = store.get(`work-day-${uid}`) || [];
-    if (work_day.length === 0) {
+    // const work_day = store.get(`work-day-${uid}`) || [];
+    // if (work_day.length === 0) {
+    //   return;
+    // }
+
+    const userActivityData = store.get(`data-user-${uid}`)?.activities
+
+    userActivityData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const lastActivity = userActivityData[userActivityData.length - 1];
+    if (!lastActivity) {
       return;
     }
-    const lastItem = work_day[work_day.length - 1];
-    const dateLocal = new Date().toLocaleDateString('en-US');
-    
-    const endLocalWork = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    logger.info(`Hora de finalización del trabajo: ${endLocalWork}`);
+    const timestamp = new Date().toISOString().replace('T',' ').substring(0, 19)
+    const newLastActivity = {
+      presence: {timestamp : timestamp , status: 'active' },
+      screenshot: null,
+      latitude: null,
+      longitude: null,
+      ip_address: null,
+      partner_id: lastActivity.partner_id[0] || null,
+      description: lastActivity.description,
+      task_id: lastActivity.task_id[0] || null,
+      brand_id : lastActivity.brand_id[0] || null,
+      pause_id: null,
+    }
 
-    const completeDate = new Date(`${dateLocal} ${endLocalWork}`).toISOString().replace('T',' ').substring(0, 19);
-    const completeDateStartWork = new Date(`${dateLocal} ${lastItem.startWork}`).toISOString().replace('T',' ').substring(0, 19);
+    await checkDataAndSend(newLastActivity);
+
+    // const lastItem = work_day[work_day.length - 1];
+    // const dateLocal = new Date().toLocaleDateString('en-US');
     
-    //data para el resumen:
-    const lastData = [{
-      user_id: parseInt(uid),
-      partner_id: lastItem.client.id,
-      start_time: completeDateStartWork,
-      end_time: completeDate,
-      total_hours: calculateTimeDifference(lastItem.startWork, endLocalWork),
-      odoo_id: lastItem.odoo_id
-    }];
-    await sendDataSummary('user.activity.summary', lastData);
+    // const endLocalWork = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    // logger.info(`Hora de finalización del trabajo: ${endLocalWork}`);
+
+    // const completeDate = new Date(`${dateLocal} ${endLocalWork}`).toISOString().replace('T',' ').substring(0, 19);
+    // const completeDateStartWork = new Date(`${dateLocal} ${lastItem.startWork}`).toISOString().replace('T',' ').substring(0, 19);
+    
+    // //data para el resumen:
+    // const lastData = [{
+    //   user_id: parseInt(uid),
+    //   partner_id: lastItem.client.id,
+    //   start_time: completeDateStartWork,
+    //   end_time: completeDate,
+    //   total_hours: calculateTimeDifference(lastItem.startWork, endLocalWork),
+    //   odoo_id: lastItem.odoo_id
+    // }];
+    // await sendDataSummary('user.activity.summary', lastData);
   }
   ipcMain.on('close-all-windows', async () => {
     
@@ -608,13 +651,12 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     // // // const odoo_ids = await checkDataAndSend(manualData);
     // // // const odoo_id = await sendActivityUserSummary();
     
-    const [odoo_ids, odoo_id] = await Promise.all([  
+    const [odoo_ids] = await Promise.all([  
       await checkDataAndSend(manualData),
-      await sendActivityUserSummary()
+      // await sendActivityUserSummary()
     ]);
     
-    console.log('Datos enviados:', odoo_ids, odoo_id);
-    logger.info(`Datos enviados: ${odoo_ids}, Resumen: ${odoo_id}`);
+    logger.info(`Datos enviados: ${odoo_ids}`);
     const store = await getStore();
     const { uid } = await getCredentials(['uid']);
     const work_day = store.get(`work-day-${uid}`) || [];
@@ -626,9 +668,9 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
 
     lastItem.odoo_ids.push(odoo_ids.odoo_ids);
 
-    if (lastItem.odoo_id === ' ' ){
-      lastItem.odoo_id = odoo_id.odoo_id;
-    }
+    // if (lastItem.odoo_id === ' ' ){
+    //   lastItem.odoo_id = odoo_id.odoo_id;
+    // }
     
 
     store.set(`work-day-${uid}`, work_day);
@@ -638,7 +680,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       win.webContents.send('info-send', {
         message: {
           'activity data send': odoo_ids,
-          'summary data send': odoo_id,
+          // 'summary data send': odoo_id,
         }
         
       });
@@ -691,7 +733,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       //Enviar datos offlinea primero
       if (offLineaData.length > 0 && statusConnection.status) {
         // console.time('time-function-sendLocalData');
-        await sendLocalData('offlineData', 'summary');
+        // await sendLocalData('offlineData', 'summary');
         await sendLocalData('offlineData', 'normal');
         // console.timeEnd('time-function-sendLocalData');
         const synchronizeData = await getUserActivity();
@@ -762,119 +804,113 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         }
       }
       
-      if (pause > 0) {
-        const lastPause = work_day.find(rec => rec.pause === true);
-        if (!lastPause) {
-          const data_work_day = {
-            client: { id: client_data.id, name: client_data.name },
-            brand: brand_name,
-            date: new Date().toLocaleDateString('en-US'),
-            startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
-            endWork: '00:00',
-            timeWorked: '00:00',
-            task: task_name,
-            description: 'Pausa',
-            pause: true,
-            userId: uid,
-            odoo_id: ' ',
-            odoo_ids: []
-          };
+      // if (pause > 0) {
+      //   const lastPause = work_day.find(rec => rec.pause === true);
+      //   if (!lastPause) {
+      //     const data_work_day = {
+      //       client: { id: client_data.id, name: client_data.name },
+      //       brand: brand_name,
+      //       date: new Date().toLocaleDateString('en-US'),
+      //       startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
+      //       endWork: '00:00',
+      //       timeWorked: '00:00',
+      //       task: task_name,
+      //       description: 'Pausa',
+      //       pause: true,
+      //       userId: uid,
+      //       odoo_id: ' ',
+      //       odoo_ids: []
+      //     };
 
 
-          const lastItem = work_day.length > 0 ? work_day[work_day.length - 1] : null;
-          if (lastItem) {
+      //     const lastItem = work_day.length > 0 ? work_day[work_day.length - 1] : null;
+      //     if (lastItem) {
             
-            lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
-            lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
-          }
-          work_day.push(data_work_day);
-          store.set(`work-day-${uid}`, work_day);
-        } else {
-          lastPause.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
-          lastPause.timeWorked = calculateTimeDifference(lastPause.startWork, lastPause.endWork);
-          lastPause.description = 'Pausa';
-          lastPause.pause = false;
-          store.set(`work-day-${uid}`, work_day);
-        }
+      //       lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
+      //       lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
+      //     }
+      //     work_day.push(data_work_day);
+      //     store.set(`work-day-${uid}`, work_day);
+      //   } else {
+      //     lastPause.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
+      //     lastPause.timeWorked = calculateTimeDifference(lastPause.startWork, lastPause.endWork);
+      //     lastPause.description = 'Pausa';
+      //     lastPause.pause = false;
+      //     store.set(`work-day-${uid}`, work_day);
+      //   }
       
         
-      } 
-      if (!pause  && !regPrevHour) {
-        if (work_day.length === 0) {
-          const data_work_day = {
-            client: client_data,
-            brand: brand_name,
-            date: new Date().toLocaleDateString('en-US'),
-            startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
-            endWork: '00:00',
-            timeWorked: '00:00',
-            task: task_name,
-            description: description,
-            userId: uid,
-            odoo_id: ' ',
-            odoo_ids: []
-          };
+      // } 
+      // if (!pause  && !regPrevHour) {
+      //   if (work_day.length === 0) {
+      //     const data_work_day = {
+      //       client: client_data,
+      //       brand: brand_name,
+      //       date: new Date().toLocaleDateString('en-US'),
+      //       startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
+      //       endWork: '00:00',
+      //       timeWorked: '00:00',
+      //       task: task_name,
+      //       description: description,
+      //       userId: uid,
+      //       odoo_id: ' ',
+      //       odoo_ids: []
+      //     };
     
-          work_day.push(data_work_day);
-          store.set(`work-day-${uid}`, work_day);
-          logger.info(`Primer cliente agregado: ${client_data.name}`);
-          lastClient = client_data.id;
-        } else {
-          const lastItem = work_day[work_day.length - 1];
+      //     work_day.push(data_work_day);
+      //     store.set(`work-day-${uid}`, work_day);
+      //     logger.info(`Primer cliente agregado: ${client_data.name}`);
+      //     lastClient = client_data.id;
+      //   } else {
+      //     const lastItem = work_day[work_day.length - 1];
     
-          if (lastItem.client.id !== client_data.id || lastItem.brand !== brand_name || lastItem.task !== task_name) {
-            lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
-            lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
-            const data_work_day = {
-              client: client_data,
-              brand: brand_name,
-              date: new Date().toLocaleDateString('en-US'),
-              startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
-              endWork: '00:00',
-              timeWorked: '00:00',
-              task: task_name,
-              description: description,
-              userId: uid,
-              odoo_id: ' ',
-              odoo_ids: []
-            };
-            work_day.push(data_work_day);
-            store.set(`work-day-${uid}`, work_day);
-          } else {
-            lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
-            lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
-            lastItem.description = description;
-            store.set(`work-day-${uid}`, work_day);
-          }
-        }
+      //     if (lastItem.client.id !== client_data.id || lastItem.brand !== brand_name || lastItem.task !== task_name) {
+      //       lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
+      //       lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
+      //       const data_work_day = {
+      //         client: client_data,
+      //         brand: brand_name,
+      //         date: new Date().toLocaleDateString('en-US'),
+      //         startWork: convertDate(activityData.presence.timestamp.split(' ')[1]),
+      //         endWork: '00:00',
+      //         timeWorked: '00:00',
+      //         task: task_name,
+      //         description: description,
+      //         userId: uid,
+      //         odoo_id: ' ',
+      //         odoo_ids: []
+      //       };
+      //       work_day.push(data_work_day);
+      //       store.set(`work-day-${uid}`, work_day);
+      //     } else {
+      //       lastItem.endWork = convertDate(activityData.presence.timestamp.split(' ')[1]);
+      //       lastItem.timeWorked = calculateTimeDifference(lastItem.startWork, lastItem.endWork);
+      //       lastItem.description = description;
+      //       store.set(`work-day-${uid}`, work_day);
+      //     }
+      //   }
 
-      }
+      // }
 
       if (regPrevHour) {
         logger.info('Registro de hora previa');
         
         activityData.presence = { status: 'active', timestamp: regPrevHour.timeStart};
-        const data_work_day = {
-          client: client_data,
-          brand: brand_name,
-          date: new Date().toLocaleDateString('en-US'),
-          startWork: convertDate(regPrevHour.timeStart.split(' ')[1]),
-          endWork: convertDate(regPrevHour.timeEnd.split(' ')[1]),
-          timeWorked: calculateTimeDifference(regPrevHour.timeStart.split(' ')[1], regPrevHour.timeEnd.split(' ')[1]),
-          task: task_name,
-          description: description,
-          userId: uid,
-          odoo_id: ' ',
-          odoo_ids: []
-        };
-        work_day.push(data_work_day);
-        work_day.sort((a, b) => a.startWork.localeCompare(b.startWork));
-        store.set(`work-day-${uid}`, work_day);
+        // const data_work_day = {
+        //   client: client_data,
+        //   brand: brand_name,
+        //   date: new Date().toLocaleDateString('en-US'),
+        //   startWork: convertDate(regPrevHour.timeStart.split(' ')[1]),
+        //   endWork: convertDate(regPrevHour.timeEnd.split(' ')[1]),
+        //   timeWorked: calculateTimeDifference(regPrevHour.timeStart.split(' ')[1], regPrevHour.timeEnd.split(' ')[1]),
+        //   task: task_name,
+        //   description: description,
+        //   userId: uid,
+        //   odoo_id: ' ',
+        //   odoo_ids: []
+        // };
       }
-
       if (!statusConnection.status)  {
-        logger.warn(`Not connection to server | message: ${statusConnection.message} | data will be saved locally`);
-        captureScreen(activityData)
         const dataToSend = {
           timestamp: activityData.presence.timestamp,
           presence_status: activityData.presence.status,
@@ -888,6 +924,9 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
           brand_id : activityData.brand_id || null,
           pause_id : activityData.pause_id || null,
         };
+        logger.warn(`Not connection to server | message: ${statusConnection.message} | data will be saved locally`);
+        captureScreen(activityData)
+       
         saveDataLocally(dataToSend, 'offlineData');
         BrowserWindow.getAllWindows().forEach(win => {
           win.webContents.send('work-day-updated', work_day);
@@ -899,9 +938,9 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         logger.info('Connection established with server, sending data');
       }
       
-      const [activityDataLog, summaryDataLog] = await Promise.all([
-        checkDataAndSend(activityData),
-        sendActivityUserSummary(),
+      const [activityDataLog] = await Promise.all([
+        checkDataAndSend(activityData, regPrevHour),
+        // sendActivityUserSummary(),
       ]);
 
       
@@ -916,13 +955,9 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         store.set(`data-user-${uid}`, userActivityData);
         activityData.partner_id = null;
         activityData.description = null;
-
-        const work_day_sincronice = store.get(`work-day-${uid}`) || [];
-        const addIdLasItem = work_day_sincronice[work_day.length - 1];
-        addIdLasItem.odoo_ids.push(activityDataLog.odoo_ids);
-        if (addIdLasItem.odoo_id === ' ' ){
-          addIdLasItem.odoo_id = summaryDataLog.odoo_id;
-        }
+        
+        const work_day_sincronice = buildWorkDayFromOdooData(store.get(`data-user-${uid}`), uid, clients);
+        
         store.set(`work-day-${uid}`, work_day_sincronice);
         // ESPERA PARA QUE SE ACTUALICE EL STORE
         BrowserWindow.getAllWindows().forEach(win => {
@@ -940,7 +975,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         win.webContents.send('info-send', {
           message: {
             'activity data send': activityDataLog,
-            'summary data send': summaryDataLog,
+            // 'summary data send': summaryDataLog,
           }
           
         });
