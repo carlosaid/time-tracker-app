@@ -268,6 +268,8 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
   activitiesSorted.forEach((activity, index) => {
     const status = String(activity.presence_status || '').toLowerCase();
     const activityTime = toDate(activity.timestamp);
+    const prevActivity = activitiesSorted[index - 1];
+    const prevActivityTime = toDate(prevActivity?.timestamp);
     const nextActivity = activitiesSorted[index + 1];
     const nextActivityTime = toDate(nextActivity?.timestamp);
     if (!activityTime) return;
@@ -286,8 +288,16 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       current.client.id === clientId &&
       current.brand === brandName &&
       current.task === taskName;
+
+    let keepSameGroupByInactive = false;
+    if ( status === 'inactive' && nextActivity?.presence_status === 'active' ) {
+      if ( (Math.round(nextActivityTime - prevActivityTime) / 60000) <= intervalTask) {
+        keepSameGroupByInactive = true;
+      }
+    }
+    
     // Crear nuevo registro si no es es del mismo grupo
-    if (!isSameGroup) {
+    if (!isSameGroup && !keepSameGroupByInactive) {
       current = {
         client: { id: clientId, name: clientName },
         date: new Date().toLocaleDateString('en-US'),
