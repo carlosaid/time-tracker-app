@@ -4,6 +4,8 @@ const path = require('path');
 let loginWindow;
 let mainWindow;
 let modalWindow;
+const MODAL_DEFAULT_WIDTH = 450;
+const MODAL_DEFAULT_HEIGHT = 530;
 
 function createLoginWindow() {
   if (loginWindow) {
@@ -143,8 +145,8 @@ function createModalWindow() {
     modal: true,
     icon: path.join(__dirname, '../assets/img/time-tracker-img.png'),
     // show: false,
-    width: 450,
-    height: 440,
+    width: MODAL_DEFAULT_WIDTH,
+    height: MODAL_DEFAULT_HEIGHT,
     // resizable: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload.js'),
@@ -160,6 +162,7 @@ function createModalWindow() {
     alwaysOnTop: true,
   });
 
+  modalWindow.setSize(MODAL_DEFAULT_WIDTH, MODAL_DEFAULT_HEIGHT);
   modalWindow.loadFile('./src/pages/modal.html');
 
   // modalWindow.on('minimize', (event) => {
@@ -170,6 +173,7 @@ function createModalWindow() {
   modalWindow.on('close', (event) => {
     if (!app.isQuiting) {
       event.preventDefault();
+      modalWindow.setSize(MODAL_DEFAULT_WIDTH, MODAL_DEFAULT_HEIGHT);
       modalWindow.hide();
     }
   });

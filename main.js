@@ -59,6 +59,7 @@ const activityData = {
   description: null,
   task_id: null,
   brand_id: null,
+  project_id: null,
   pause_id: null,
 };
 
@@ -279,6 +280,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     const taskName = activity.task_id ? activity.task_id[1] : ' ';
     const intervalTask = clients.find(rec => rec.id === clientId)?.tasks?.find(t => t.name === taskName)?.time_notification || 40;
     const brandName = activity.brand_id ? activity.brand_id[1] || ' ' : ' ';
+    const projectName = activity.project_id ? activity.project_id[1] || ' ' : ' ';
     const description = activity.pause_id ? activity.pause_id[1] : (activity.description || ' ');
     const activityTimePart = getTimePart(activity.timestamp);
     if (!activityTimePart) return;
@@ -305,6 +307,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         endWork: activityTimeLocal,
         timeWorked: '00:00',
         task: taskName,
+        project: projectName,
         description,
         brand: brandName,
         userId: uid,
@@ -323,6 +326,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       if (nextTimePart && intervalTask && Math.round((nextActivityTime - activityTime) / 60000) <= intervalTask + 10) {
         current.endWork = convertDate(nextTimePart);
         current.timeWorked = formatDuration(current.activeDurationMs);
+        current.project = nextActivity.project_id ? nextActivity.project_id[1] || current.project : current.project;
         current.description = updateDescription(activity, nextActivity);
 
       }
@@ -334,6 +338,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         endWork: convertDate(nextTimePart),
         timeWorked: '00:00',
         task: nextActivity.task_id ? nextActivity.task_id[1] : ' ',
+        project: nextActivity.project_id ? nextActivity.project_id[1] || ' ' : ' ',
         description: nextActivity.description,
         brand: nextActivity.brand_id ? nextActivity.brand_id[1] || ' ' : ' ',
         userId: uid,
@@ -554,6 +559,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       description: lastActivity.description,
       task_id: lastActivity.task_id[0] || null,
       brand_id : lastActivity.brand_id[0] || null,
+      project_id: lastActivity.project_id?.[0] || null,
       pause_id: null,
     }
 
@@ -608,7 +614,11 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
 
   ipcMain.on('prev-hours', () => {
     createModalWindow();
-    getModalWindow().webContents.send('prev-hours');
+    const modalWindow = getModalWindow();
+    if (modalWindow) {
+      modalWindow.setSize(450, 560);
+      modalWindow.webContents.send('prev-hours');
+    }
   })
 
   ipcMain.on('logout', async () => {
@@ -729,8 +739,8 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
   });
 
   ipcMain.on('send-data', async (event, data) => {
-    const { client, description, brand, task, pause, regPrevHour = false} = data;
-    logger.info(`Datos recibidos del formulario: ${JSON.stringify({ client, description, task , pause, regPrevHour })}`);
+    const { client, description, brand, project, task, pause, regPrevHour = false} = data;
+    logger.info(`Datos recibidos del formulario: ${JSON.stringify({ client, description, brand, project, task , pause, regPrevHour })}`);
     statusConnection = await checkServerConnection();
     try {
       const { uid } = await getCredentials(['uid']);
@@ -764,13 +774,14 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       activityData.description = description;
       activityData.task_id = task;
       activityData.brand_id = brand;
+      activityData.project_id = project;
       activityData.pause_id = pause;
       activityData.presence = { status: 'active', timestamp: new Date().toISOString().replace('T',' ').substring(0, 19) };
   
       const client_data = clients.find(rec => rec.id == client);
       const selectedTask = client_data?.tasks?.find(rec => rec.id === parseInt(task));
       const task_name = selectedTask?.name || ' ';
-      const brand_name = client_data['brands'].find( rec => rec.id === parseInt(brand))?.name || ' ';
+      const brand_name = client_data?.brands?.find( rec => rec.id === parseInt(brand))?.name || ' ';
       let lastClient = null;
       
       let taskTags = [];
@@ -932,6 +943,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
           description: activityData.description || null,
           task_id: activityData.task_id || null,
           brand_id : activityData.brand_id || null,
+          project_id : activityData.project_id || null,
           pause_id : activityData.pause_id || null,
         };
         logger.warn(`Not connection to server | message: ${statusConnection.message} | data will be saved locally`);
@@ -965,6 +977,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         store.set(`data-user-${uid}`, userActivityData);
         activityData.partner_id = null;
         activityData.description = null;
+        activityData.project_id = null;
         
         const work_day_sincronice = buildWorkDayFromOdooData(store.get(`data-user-${uid}`), uid, clients);
         
