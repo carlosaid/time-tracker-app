@@ -40,6 +40,11 @@ ipcRenderer.on('odoo-notification', (event, notification) => {
 	storeOdooNotification(notification);
 });
 
+ipcRenderer.on('open-odoo-notification', (event, notification) => {
+	storeOdooNotification(notification);
+	openNotificationDetail(`odoo-bus-${notification.busNotificationId}`);
+});
+
 let updateBannerEl = null;
 let pendingUpdateStatus = null;
 

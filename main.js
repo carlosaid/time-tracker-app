@@ -1,4 +1,4 @@
-const { app, Tray, Menu, ipcMain, BrowserWindow, net , powerMonitor } = require('electron');
+const { app, Tray, Menu, ipcMain, BrowserWindow, Notification, net , powerMonitor } = require('electron');
 
 const { autoUpdater, AppUpdater } = require("electron-updater");
 const { authenticateUser } = require('./src/odoo/authenticateUser');
@@ -50,7 +50,87 @@ let pauseAutoResumeMinutes = null;
 let isPaused = false;
 
 const pendingOdooNotifications = [];
+const systemNotifiedNotificationIds = new Set();
+const activeSystemNotifications = new Set();
 const odooWebsocketService = new OdooWebsocketService();
+
+function notificationHtmlToText(htmlContent) {
+  return String(htmlContent || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(div|p|li|ul|ol)\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (match, code) => {
+      const codePoint = Number(code);
+      return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10FFFF
+        ? String.fromCodePoint(codePoint)
+        : match;
+    })
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n')
+    .trim();
+}
+
+function openOdooNotification(notification) {
+  const openDetail = () => {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('open-odoo-notification', notification);
+  };
+
+  let mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = createMainWindow();
+  }
+
+  if (mainWindow.webContents.isLoadingMainFrame()) {
+    mainWindow.webContents.once('did-finish-load', openDetail);
+  } else {
+    openDetail();
+  }
+}
+
+function showSystemNotification(notification) {
+  if (!Notification.isSupported()) return;
+
+  const persistentNotificationId = notification.notificationId;
+  if (
+    persistentNotificationId === undefined ||
+    persistentNotificationId === null ||
+    systemNotifiedNotificationIds.has(String(persistentNotificationId))
+  ) return;
+
+  systemNotifiedNotificationIds.add(String(persistentNotificationId));
+  const body = notificationHtmlToText(notification.payload?.content)
+    .replace(/\n/g, ' ')
+    .slice(0, 180) || 'Tienes una nueva notificación.';
+  const systemNotification = new Notification({
+    title: 'Nueva notificación de Time Tracker',
+    body,
+    silent: false,
+  });
+
+  activeSystemNotifications.add(systemNotification);
+  systemNotification.on('click', () => openOdooNotification(notification));
+  systemNotification.on('close', () => activeSystemNotifications.delete(systemNotification));
+  systemNotification.on('failed', (event, error) => {
+    activeSystemNotifications.delete(systemNotification);
+    logger.error(`No se pudo mostrar la notificación del sistema: ${error || 'error desconocido'}`);
+  });
+  systemNotification.show();
+}
+
+function closeSystemNotifications() {
+  activeSystemNotifications.forEach((notification) => notification.close());
+  activeSystemNotifications.clear();
+}
 
 odooWebsocketService.on('connected', ({
   websocketUrl,
@@ -87,6 +167,8 @@ odooWebsocketService.on('notification', (notification) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('odoo-notification', notification);
   }
+
+  showSystemNotification(notification);
 });
 
 odooWebsocketService.on('connection-error', (error) => {
@@ -478,6 +560,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
   // }
 
   app.whenReady().then(() => {
+	app.setAppUserModelId('com.electron-project');
 
     powerMonitor.on('suspend', async () => {
       const store = await getStore();
@@ -507,6 +590,8 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
 
         await saveCredentials(username, password, url, odooConfig.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
         pendingOdooNotifications.length = 0;
+        systemNotifiedNotificationIds.clear();
+        closeSystemNotifications();
         await odooWebsocketService.start({
           baseUrl: url,
           sessionId: setCookieHeader,
@@ -691,6 +776,8 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     try {
       odooWebsocketService.stop();
       pendingOdooNotifications.length = 0;
+      systemNotifiedNotificationIds.clear();
+      closeSystemNotifications();
       await clearCredentials();
       
       logger.info('Usuario ha cerrado sesión');
