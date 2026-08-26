@@ -18,6 +18,7 @@ const nodeNotifier = require('node-notifier');
 const { checkServerConnection } = require('./src/utils/checkConnection');
 const { getUserActivity } = require('./src/odoo/getUserActivity');
 const { sendDataSummary } = require('./src/odoo/sendData');
+const { OdooWebsocketService } = require('./src/services/odooWebsocketService');
 // const { getDataPause } = require('./src/odoo/getDataPuase');
 const { systemLogger } = require('./src/utils/systemLogs');
 const logger = systemLogger();
@@ -47,6 +48,50 @@ let currentNotificationMinutes = null;
 let pauseAutoResumeTimeout = null;
 let pauseAutoResumeMinutes = null;
 let isPaused = false;
+
+const pendingOdooNotifications = [];
+const odooWebsocketService = new OdooWebsocketService();
+
+odooWebsocketService.on('connected', ({
+  websocketUrl,
+  currentUserId,
+  currentPartnerId,
+  subscription,
+}) => {
+  logger.info(`WebSocket de Odoo conectado correctamente: ${websocketUrl}`);
+  logger.info(
+    `Contexto de sesión WebSocket: uid=${currentUserId ?? 'desconocido'}, partner_id=${currentPartnerId ?? 'desconocido'}, subscribe=${JSON.stringify(subscription)}`,
+  );
+  logger.info(
+    'Electron solicita channels=[]; Odoo agrega internamente los canales autorizados de broadcast, grupos y partner para esta sesión.',
+  );
+});
+
+odooWebsocketService.on('raw-message', (rawMessage) => {
+  logger.info(`Mensaje WebSocket recibido directamente de Odoo: ${rawMessage}`);
+});
+
+odooWebsocketService.on('formatted-notification', (notification) => {
+  logger.info(`Notificación formateada para Electron: ${JSON.stringify(notification)}`);
+});
+
+odooWebsocketService.on('notification', (notification) => {
+  logger.info(
+    `Notificación de Odoo recibida: bus_id=${notification.busNotificationId}, notification_id=${notification.notificationId}`,
+  );
+
+  pendingOdooNotifications.push(notification);
+  if (pendingOdooNotifications.length > 100) pendingOdooNotifications.shift();
+
+  const mainWindow = getMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('odoo-notification', notification);
+  }
+});
+
+odooWebsocketService.on('connection-error', (error) => {
+  logger.error(`Error en WebSocket de Odoo: ${error.message}`);
+});
 
 const activityData = {
   odoo_id: null,
@@ -380,6 +425,11 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
           logger.info(`Configuración obtenida: ${JSON.stringify(odooConfig)}`);
           await saveCredentials(username, password, url, odooConfig.time_notification.toString()  , uid, session_id, db);
           session = true;
+          await odooWebsocketService.start({
+            baseUrl: url,
+            sessionId: session_id,
+            currentUserId: uid,
+          });
           
           const store = await getStore();
           const work_day = store.get(`work-day-${uid}`) || [];
@@ -441,7 +491,14 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     ipcMain.handle('login', async (event, username, password, url, db) => {
       try {
         
-        const { setCookieHeader, uid, imageBase64 , name } = await authenticateUser(username, password, url, db);
+        const {
+          setCookieHeader,
+          uid,
+          imageBase64,
+          name,
+          websocketWorkerVersion,
+          partnerId,
+        } = await authenticateUser(username, password, url, db);
         const [clients ,odooConfig ,store] = await Promise.all([
           getClients(setCookieHeader, url),
           getConfig(setCookieHeader, url),
@@ -449,6 +506,14 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
         ]);
 
         await saveCredentials(username, password, url, odooConfig.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
+        pendingOdooNotifications.length = 0;
+        await odooWebsocketService.start({
+          baseUrl: url,
+          sessionId: setCookieHeader,
+          websocketWorkerVersion,
+          currentUserId: uid,
+          currentPartnerId: partnerId,
+        });
         // const pauses = await getDataPause()
         const pauses = odooConfig.user_activity_pause;
         const userActivityData = await getUserActivity();
@@ -624,7 +689,8 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
   ipcMain.on('logout', async () => {
     await sendLastData();
     try {
-      
+      odooWebsocketService.stop();
+      pendingOdooNotifications.length = 0;
       await clearCredentials();
       
       logger.info('Usuario ha cerrado sesión');
@@ -1043,6 +1109,10 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     return app.getVersion();
   });
 
+  ipcMain.handle('get-pending-odoo-notifications', () => {
+    return pendingOdooNotifications.splice(0, pendingOdooNotifications.length);
+  });
+
   ipcMain.on('delete_data', async () => {
     const store = await getStore();
     const { uid } = await getCredentials(['uid']);
@@ -1081,6 +1151,7 @@ const sendDataBeforeQuit = async () => {
 };
 
 app.on('before-quit', async (event) => {
+  odooWebsocketService.stop();
   if (app.isQuiting) {
       return; 
   }
