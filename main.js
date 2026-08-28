@@ -4,6 +4,7 @@ const { autoUpdater, AppUpdater } = require("electron-updater");
 const { authenticateUser } = require('./src/odoo/authenticateUser');
 const { getClients } = require('./src/odoo/getClients');
 const { getConfig } = require('./src/odoo/getConfig');
+const { getNotifications } = require('./src/odoo/getNotifications');
 const { presenceNotification } = require('./src/utils/presenceNotification');
 const cron = require('node-cron');
 const path = require('path');
@@ -50,9 +51,18 @@ let pauseAutoResumeMinutes = null;
 let isPaused = false;
 
 const pendingOdooNotifications = [];
+let pendingOdooNotificationsSnapshot = null;
 const systemNotifiedNotificationIds = new Set();
 const activeSystemNotifications = new Set();
 const odooWebsocketService = new OdooWebsocketService();
+
+async function fetchOdooNotificationsSnapshot(sessionId, url) {
+  try {
+    return await getNotifications(sessionId, url);
+  } catch (error) {
+    return null;
+  }
+}
 
 function notificationHtmlToText(htmlContent) {
   return String(htmlContent || '')
@@ -112,7 +122,7 @@ function showSystemNotification(notification) {
     .replace(/\n/g, ' ')
     .slice(0, 180) || 'Tienes una nueva notificación.';
   const systemNotification = new Notification({
-    title: 'Nueva notificación de Time Tracker',
+    title: notification.payload?.title || 'Nueva notificación de Time Tracker',
     body,
     silent: false,
   });
@@ -122,7 +132,6 @@ function showSystemNotification(notification) {
   systemNotification.on('close', () => activeSystemNotifications.delete(systemNotification));
   systemNotification.on('failed', (event, error) => {
     activeSystemNotifications.delete(systemNotification);
-    logger.error(`No se pudo mostrar la notificación del sistema: ${error || 'error desconocido'}`);
   });
   systemNotification.show();
 }
@@ -132,34 +141,7 @@ function closeSystemNotifications() {
   activeSystemNotifications.clear();
 }
 
-odooWebsocketService.on('connected', ({
-  websocketUrl,
-  currentUserId,
-  currentPartnerId,
-  subscription,
-}) => {
-  logger.info(`WebSocket de Odoo conectado correctamente: ${websocketUrl}`);
-  logger.info(
-    `Contexto de sesión WebSocket: uid=${currentUserId ?? 'desconocido'}, partner_id=${currentPartnerId ?? 'desconocido'}, subscribe=${JSON.stringify(subscription)}`,
-  );
-  logger.info(
-    'Electron solicita channels=[]; Odoo agrega internamente los canales autorizados de broadcast, grupos y partner para esta sesión.',
-  );
-});
-
-odooWebsocketService.on('raw-message', (rawMessage) => {
-  logger.info(`Mensaje WebSocket recibido directamente de Odoo: ${rawMessage}`);
-});
-
-odooWebsocketService.on('formatted-notification', (notification) => {
-  logger.info(`Notificación formateada para Electron: ${JSON.stringify(notification)}`);
-});
-
 odooWebsocketService.on('notification', (notification) => {
-  logger.info(
-    `Notificación de Odoo recibida: bus_id=${notification.busNotificationId}, notification_id=${notification.notificationId}`,
-  );
-
   pendingOdooNotifications.push(notification);
   if (pendingOdooNotifications.length > 100) pendingOdooNotifications.shift();
 
@@ -169,10 +151,6 @@ odooWebsocketService.on('notification', (notification) => {
   }
 
   showSystemNotification(notification);
-});
-
-odooWebsocketService.on('connection-error', (error) => {
-  logger.error(`Error en WebSocket de Odoo: ${error.message}`);
 });
 
 const activityData = {
@@ -496,13 +474,15 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       if (username && password) {
         logger.info(`Iniciando sesión para el usuario: ${username}`);
         try {
-          const[clients, userActivityData, odooConfig , connection] = await Promise.all([
+          const[clients, userActivityData, odooConfig, connection, notificationsSnapshot] = await Promise.all([
             getClients(session_id, url),
             getUserActivity(),
             getConfig(session_id, url),
             checkServerConnection(),
+            fetchOdooNotificationsSnapshot(session_id, url),
             // getDataPause()
           ]);
+          pendingOdooNotificationsSnapshot = notificationsSnapshot;
           pausas = odooConfig.user_activity_pause;
           logger.info(`Configuración obtenida: ${JSON.stringify(odooConfig)}`);
           await saveCredentials(username, password, url, odooConfig.time_notification.toString()  , uid, session_id, db);
@@ -582,16 +562,19 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
           websocketWorkerVersion,
           partnerId,
         } = await authenticateUser(username, password, url, db);
-        const [clients ,odooConfig ,store] = await Promise.all([
-          getClients(setCookieHeader, url),
-          getConfig(setCookieHeader, url),
-          getStore()
-        ]);
-
-        await saveCredentials(username, password, url, odooConfig.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
         pendingOdooNotifications.length = 0;
+        pendingOdooNotificationsSnapshot = null;
         systemNotifiedNotificationIds.clear();
         closeSystemNotifications();
+        const [clients, odooConfig, store, notificationsSnapshot] = await Promise.all([
+          getClients(setCookieHeader, url),
+          getConfig(setCookieHeader, url),
+          getStore(),
+          fetchOdooNotificationsSnapshot(setCookieHeader, url),
+        ]);
+        pendingOdooNotificationsSnapshot = notificationsSnapshot;
+
+        await saveCredentials(username, password, url, odooConfig.time_notification.toString() , uid.toString(), setCookieHeader.toString(), db);
         await odooWebsocketService.start({
           baseUrl: url,
           sessionId: setCookieHeader,
@@ -776,6 +759,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     try {
       odooWebsocketService.stop();
       pendingOdooNotifications.length = 0;
+      pendingOdooNotificationsSnapshot = null;
       systemNotifiedNotificationIds.clear();
       closeSystemNotifications();
       await clearCredentials();
@@ -1198,6 +1182,12 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
 
   ipcMain.handle('get-pending-odoo-notifications', () => {
     return pendingOdooNotifications.splice(0, pendingOdooNotifications.length);
+  });
+
+  ipcMain.handle('get-odoo-notifications-snapshot', () => {
+    const snapshot = pendingOdooNotificationsSnapshot;
+    pendingOdooNotificationsSnapshot = null;
+    return snapshot;
   });
 
   ipcMain.on('delete_data', async () => {

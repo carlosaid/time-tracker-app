@@ -15,36 +15,6 @@ ipcRenderer.on('info-send', (event, message) => {
 	console.info(message);
 });
 
-function storeOdooNotification(notification) {
-	const payload = notification?.payload;
-	if (!payload) return;
-
-	const contentElement = document.createElement('div');
-	contentElement.innerHTML = payload.content || '';
-	const content = contentElement.textContent.trim() || 'Nueva notificación de Odoo.';
-	addNotification(
-		'Nueva notificación',
-		content,
-		`odoo-bus-${notification.busNotificationId}`,
-		{
-			busNotificationId: notification.busNotificationId,
-			notificationId: notification.notificationId,
-			userId: payload.user_id,
-			notifyAll: payload.notify_all,
-			htmlContent: payload.content || '',
-		}
-	);
-}
-
-ipcRenderer.on('odoo-notification', (event, notification) => {
-	storeOdooNotification(notification);
-});
-
-ipcRenderer.on('open-odoo-notification', (event, notification) => {
-	storeOdooNotification(notification);
-	openNotificationDetail(`odoo-bus-${notification.busNotificationId}`);
-});
-
 let updateBannerEl = null;
 let pendingUpdateStatus = null;
 
@@ -70,6 +40,91 @@ function getNotifications() {
 function saveNotifications(notifications) {
 	localStorage.setItem(getNotificationsStorageKey(), JSON.stringify(notifications.slice(0, 30)));
 }
+
+function normalizeOdooNotificationDate(value, fallback) {
+	if (!value) return fallback || new Date().toISOString();
+
+	const dateText = String(value).trim();
+	const hasTimezone = /[zZ]$/.test(dateText) || /[+-]\d{2}:?\d{2}$/.test(dateText);
+	const parsedDate = new Date(hasTimezone ? dateText : `${dateText}Z`);
+	return Number.isNaN(parsedDate.getTime())
+		? (fallback || new Date().toISOString())
+		: parsedDate.toISOString();
+}
+
+function normalizeOdooNotification(notification, previousNotification) {
+	const payload = notification?.payload || notification;
+	const notificationId = notification?.notificationId ?? payload?.id;
+	if (!payload || notificationId === undefined || notificationId === null) return null;
+
+	const contentElement = document.createElement('div');
+	contentElement.innerHTML = payload.content || '';
+
+	return {
+		id: `odoo-notification-${notificationId}`,
+		title: payload.title || 'Nueva notificación',
+		message: contentElement.textContent.trim() || 'Nueva notificación de Odoo.',
+		createdAt: normalizeOdooNotificationDate(payload.create_date, previousNotification?.createdAt),
+		read: previousNotification?.read || false,
+		busNotificationId: notification.busNotificationId,
+		notificationId,
+		htmlContent: payload.content || '',
+	};
+}
+
+function processOdooNotifications(incomingNotifications, { authoritative = false } = {}) {
+	if (!Array.isArray(incomingNotifications)) return [];
+
+	const localNotifications = getNotifications();
+	const localByOdooId = new Map(
+		localNotifications
+			.filter((notification) => notification.notificationId !== undefined && notification.notificationId !== null)
+			.map((notification) => [String(notification.notificationId), notification])
+	);
+	const normalizedNotifications = incomingNotifications
+		.map((notification) => {
+			const payload = notification?.payload || notification;
+			const notificationId = notification?.notificationId ?? payload?.id;
+			return normalizeOdooNotification(
+				notification,
+				localByOdooId.get(String(notificationId))
+			);
+		})
+		.filter(Boolean);
+
+	let nextNotifications;
+	if (authoritative) {
+		const nonOdooNotifications = localNotifications.filter(
+			(notification) => notification.notificationId === undefined || notification.notificationId === null
+		);
+		nextNotifications = [...normalizedNotifications.reverse(), ...nonOdooNotifications];
+	} else {
+		nextNotifications = [...localNotifications];
+		normalizedNotifications.forEach((notification) => {
+			const existingIndex = nextNotifications.findIndex(
+				(item) => String(item.notificationId) === String(notification.notificationId)
+			);
+			if (existingIndex >= 0) {
+				nextNotifications[existingIndex] = notification;
+			} else {
+				nextNotifications.unshift(notification);
+			}
+		});
+	}
+
+	saveNotifications(nextNotifications);
+	renderNotifications();
+	return normalizedNotifications;
+}
+
+ipcRenderer.on('odoo-notification', (event, notification) => {
+	processOdooNotifications([notification]);
+});
+
+ipcRenderer.on('open-odoo-notification', (event, notification) => {
+	const [storedNotification] = processOdooNotifications([notification]);
+	if (storedNotification) openNotificationDetail(storedNotification.id);
+});
 
 function formatNotificationTime(createdAt) {
 	const date = new Date(createdAt);
@@ -1173,11 +1228,21 @@ function sumOFHoursWorked(time1, time2) {
     return `${minSum}:${secondSum}`;   
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
 	setupNotificationCenter();
-	ipcRenderer.invoke('get-pending-odoo-notifications')
-		.then((notifications) => notifications.forEach(storeOdooNotification))
-		.catch((error) => console.warn('No se pudieron recuperar las notificaciones pendientes:', error));
+	try {
+		const notifications = await ipcRenderer.invoke('get-odoo-notifications-snapshot');
+		processOdooNotifications(notifications, { authoritative: true });
+	} catch (error) {
+		console.warn('No se pudieron sincronizar las notificaciones de Odoo:', error);
+	}
+
+	try {
+		const pendingNotifications = await ipcRenderer.invoke('get-pending-odoo-notifications');
+		processOdooNotifications(pendingNotifications);
+	} catch (error) {
+		console.warn('No se pudieron recuperar las notificaciones pendientes:', error);
+	}
 	const closeButton = document.getElementById('close');
 	closeButton.addEventListener('click', () => {
 		ipcRenderer.send('close-main-window');
