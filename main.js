@@ -653,14 +653,25 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     }
   });
 
-  ipcMain.on('close-main-window', () => {
+  ipcMain.on('close-main-window', (event) => {
     const mainWindow = getMainWindow();
     const loginWindow = getLoginWindow();
-    if (mainWindow && session) mainWindow.close();
-    if (loginWindow && !session) {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+
+    if (senderWindow && mainWindow && senderWindow.id === mainWindow.id && !senderWindow.isDestroyed()) {
+      try {
+        senderWindow.hide();
+        event.sender.send('window-hide-result', { ok: true });
+      } catch (error) {
+        event.sender.send('window-hide-result', { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (senderWindow && loginWindow && senderWindow.id === loginWindow.id) {
       app.isQuiting = true;
       app.quit();
-      tray.destroy();
+      tray?.destroy();
     }
   });
 
