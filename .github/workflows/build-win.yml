@@ -20,13 +20,20 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Read package version
+        id: package
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Build Windows
         run: npm run dist -- --win --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: time-tracker-win
+          name: time-tracker-win-v${{ steps.package.outputs.version }}
           path: |
             dist/*.exe
             dist/*.yml
