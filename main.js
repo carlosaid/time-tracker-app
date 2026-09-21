@@ -347,7 +347,7 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
   };
 
   const updateDescription = (activity, nextActivity) => {
-    if (activity.partner_id?.[0] === nextActivity.partner_id?.[0] && activity.brand_id?.[1] === nextActivity.brand_id?.[1] && activity.task_id?.[1] === nextActivity.task_id?.[1]) {
+    if (activity.partner_id?.[0] === nextActivity.partner_id?.[0] && activity.brand_id?.[1] === nextActivity.brand_id?.[1] && activity.task_id?.[1] === nextActivity.task_id?.[1] && activity.project_id?.[1] === nextActivity.project_id?.[1]) {
       return nextActivity.description || activity.description;
     } 
     else {
@@ -394,7 +394,8 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
     const isSameGroup = current &&
       current.client.id === clientId &&
       current.brand === brandName &&
-      current.task === taskName;
+      current.task === taskName &&
+      current.project === projectName;
 
     let keepSameGroupByInactive = false;
     if ( status === 'inactive' && nextActivity?.presence_status === 'active' ) {
@@ -431,7 +432,6 @@ function buildWorkDayFromOdooData(synchronizeData, uid, clients) {
       if (nextTimePart && intervalTask && Math.round((nextActivityTime - activityTime) / 60000) <= intervalTask + 10) {
         current.endWork = convertDate(nextTimePart);
         current.timeWorked = formatDuration(current.activeDurationMs);
-        current.project = nextActivity.project_id ? nextActivity.project_id[1] || current.project : current.project;
         current.description = updateDescription(activity, nextActivity);
 
       }
